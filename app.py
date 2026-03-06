@@ -1,138 +1,128 @@
-import streamlit as st
+import re
 from pathlib import Path
 import pandas as pd
+import streamlit as st
 
-# =========================
-# Configuración base
-# =========================
+from ui.styles import inject_css
 
-st.set_page_config(page_title="EWS Dashboard", layout="wide")
+# Ajusta si usas PATHS
+DATA_GOLD = Path("data/gold/enrollment")
 
-BASE_DIR = Path(__file__).resolve().parent
-GOLD_DIR = BASE_DIR / "data" / "gold" / "enrollment"
-
-st.title("📊 Early Warning System – MVP Viewer")
-
-# =========================
-# Utilidades
-# =========================
-
-def get_available_dates():
-    files = sorted(GOLD_DIR.glob("enrollment_current__*.parquet"))
-    dates = [f.stem.split("__")[1] for f in files]
-    return sorted(dates, reverse=True)
-
-
-def load_parquet(prefix, date):
-    file_path = GOLD_DIR / f"{prefix}__{date}.parquet"
-    if file_path.exists():
-        return pd.read_parquet(file_path)
-    return None
-
-
-# =========================
-# Selector de fecha
-# =========================
-
-available_dates = get_available_dates()
-
-if not available_dates:
-    st.error("No se encontraron archivos en data/gold/enrollment/")
-    st.stop()
-
-selected_date = st.selectbox("Seleccionar fecha de corte", available_dates)
-
-# =========================
-# Tabs principales
-# =========================
-
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["🏠 Dashboard", "👥 Current", "📈 Demografía", "🔁 Transferencias", "⚠️ Anomalías"]
+st.set_page_config(
+    page_title="Early Warning System – MVP Viewer",
+    page_icon="📊",
+    layout="wide",
 )
 
-# =========================
-# TAB 1 — Dashboard
-# =========================
+inject_css(st)
 
-with tab1:
-    st.subheader("Resumen general")
+st.title("📊 Early Warning System – MVP Viewer")
+st.caption("Pipeline MVP: matrícula/enrollment → curated → gold")
 
-    metrics = load_parquet("enrollment_metrics", selected_date)
+# ---------- Helpers ----------
+_MET_RE = re.compile(r"enrollment_metrics__(\d{8})\.parquet$", re.IGNORECASE)
 
-    def pick_value(df: pd.DataFrame, candidates: list[str], default=0):
-        if df is None or df.empty:
-            return default
-        cols = {c.lower(): c for c in df.columns}
-        for cand in candidates:
-            key = cand.lower()
-            if key in cols:
-                v = df[cols[key]].iloc[0]
-                try:
-                    return int(v)
-                except Exception:
-                    try:
-                        return float(v)
-                    except Exception:
-                        return v
-        return default
+@st.cache_data(show_spinner=False)
+def list_available_dates() -> list[str]:
+    if not DATA_GOLD.exists():
+        return []
+    dates = []
+    for p in DATA_GOLD.glob("enrollment_metrics__*.parquet"):
+        m = _MET_RE.match(p.name)
+        if m:
+            dates.append(m.group(1))
+    return sorted(set(dates))
 
-    if metrics is not None:
-        with st.expander("🔎 Ver columnas disponibles en enrollment_metrics"):
-            st.write(list(metrics.columns))
-            st.dataframe(metrics, use_container_width=True)
+@st.cache_data(show_spinner=False)
+def load_metrics(stamp: str) -> pd.DataFrame | None:
+    p = DATA_GOLD / f"enrollment_metrics__{stamp}.parquet"
+    return pd.read_parquet(p) if p.exists() else None
 
-        matricula = pick_value(metrics, ["matriculados_actuales", "matriculados", "matricula_actual", "matricula"])
-        retirados = pick_value(metrics, ["retirados_reales", "retirados", "retirados_syscol"])
-        transfers = pick_value(metrics, ["transferencias_internas", "transferencias", "is_transfer_internal"])
+@st.cache_data(show_spinner=False)
+def load_current(stamp: str) -> pd.DataFrame | None:
+    p = DATA_GOLD / f"enrollment_current__{stamp}.parquet"
+    return pd.read_parquet(p) if p.exists() else None
+
+# ---------- Sidebar ----------
+with st.sidebar:
+    st.subheader("⚙️ Controles")
+    available = list_available_dates()
+
+    if not available:
+        st.error("No se encontraron cortes en data/gold/enrollment.")
+        st.stop()
+
+    stamp = st.selectbox("Seleccionar fecha de corte", options=available, index=len(available)-1)
+    st.markdown(f"<span class='ews-badge'>Corte: {stamp}</span>", unsafe_allow_html=True)
+
+# ---------- Tabs ----------
+tab_dash, tab_current, tab_demo, tab_trans, tab_anom = st.tabs(
+    ["🏠 Dashboard", "👥 Current", "📌 Demografía", "🔁 Transferencias", "⚠️ Anomalías"]
+)
+
+# ---------- Dashboard ----------
+with tab_dash:
+    metrics = load_metrics(stamp)
+    if metrics is None or metrics.empty:
+        st.warning("No se encontró enrollment_metrics para esta fecha.")
+    else:
+        row = metrics.iloc[0].to_dict()
+
+        a = int(row.get("matriculados_actuales", 0))
+        b = int(row.get("retirados_reales", 0))
+        c = int(row.get("transferencias_internas", 0))
+
+        st.markdown("<div class='ews-card'>", unsafe_allow_html=True)
+        st.subheader("Resumen general")
 
         col1, col2, col3 = st.columns(3)
-        col1.metric("Matrícula actual", matricula)
-        col2.metric("Retirados reales", retirados)
-        col3.metric("Transferencias internas", transfers)
-    else:
-        st.warning("No se encontró enrollment_metrics para esta fecha.")
+        col1.metric("Matrícula actual", a)
+        col2.metric("Retirados reales", b)
+        col3.metric("Transferencias internas", c)
 
-# =========================
-# TAB 2 — Current
-# =========================
+        st.markdown("<div class='ews-divider'></div>", unsafe_allow_html=True)
+        st.caption("Tip: si ves diferencias entre snapshot y current, revisa `fecha_retiro` y la lógica de corte.")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-with tab2:
-    df_current = load_parquet("enrollment_current", selected_date)
-    if df_current is not None:
-        st.dataframe(df_current, use_container_width=True)
-    else:
+# ---------- Current ----------
+with tab_current:
+    df = load_current(stamp)
+    if df is None or df.empty:
         st.warning("No se encontró enrollment_current para esta fecha.")
-
-# =========================
-# TAB 3 — Demografía
-# =========================
-
-with tab3:
-    df_demo = load_parquet("enrollment_demographics", selected_date)
-    if df_demo is not None:
-        st.dataframe(df_demo, use_container_width=True)
     else:
-        st.warning("No se encontró enrollment_demographics.")
+        left, right = st.columns([1, 2])
 
-# =========================
-# TAB 4 — Transferencias
-# =========================
+        with left:
+            st.markdown("<div class='ews-card'>", unsafe_allow_html=True)
+            st.subheader("Filtros")
+            q = st.text_input("Buscar (RUT o Nombre)", "")
+            st.markdown("</div>", unsafe_allow_html=True)
 
-with tab4:
-    transfers = sorted(GOLD_DIR.glob(f"enrollment_transfers_all__{selected_date}*.parquet"))
-    if transfers:
-        df_transfers = pd.read_parquet(transfers[0])
-        st.dataframe(df_transfers, use_container_width=True)
-    else:
-        st.info("No hay transferencias registradas.")
+        with right:
+            st.markdown("<div class='ews-card'>", unsafe_allow_html=True)
+            st.subheader("Listado")
+            view = df.copy()
+            if q.strip():
+                qs = q.strip().upper()
+                for col in ["rut_norm", "nombre", "rut"]:
+                    if col not in view.columns:
+                        view[col] = ""
+                mask = (
+                    view["rut_norm"].fillna("").astype(str).str.upper().str.contains(qs, na=False)
+                    | view["rut"].fillna("").astype(str).str.upper().str.contains(qs, na=False)
+                    | view["nombre"].fillna("").astype(str).str.upper().str.contains(qs, na=False)
+                )
+                view = view[mask]
 
-# =========================
-# TAB 5 — Anomalías
-# =========================
+            st.dataframe(view, use_container_width=True, height=520)
+            st.markdown("</div>", unsafe_allow_html=True)
 
-with tab5:
-    df_anom = load_parquet("enrollment_age_anomalies", selected_date)
-    if df_anom is not None:
-        st.dataframe(df_anom, use_container_width=True)
-    else:
-        st.info("No se encontraron anomalías para esta fecha.")
+# ---------- Demografía / Transferencias / Anomalías ----------
+with tab_demo:
+    st.info("Aquí conectamos `enrollment_demographics__YYYYMMDD.parquet` y rankings. (Lo armamos al tiro después)")
+
+with tab_trans:
+    st.info("Aquí conectamos `enrollment_transfers_all__<stamp>.parquet` si existe.")
+
+with tab_anom:
+    st.info("Aquí conectamos `enrollment_age_anomalies__YYYYMMDD.parquet`.")
