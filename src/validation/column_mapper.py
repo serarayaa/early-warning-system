@@ -54,7 +54,7 @@ def mapear_columnas(columnas_originales: list[str], schema: dict) -> dict:
             columnas_no_reconocidas.append(col)
 
     return {
-        "mapeadas": columnas_mapeadas,              # original -> canonico
+        "mapeadas": columnas_mapeadas,
         "no_reconocidas": columnas_no_reconocidas,
     }
 

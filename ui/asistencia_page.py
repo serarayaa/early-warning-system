@@ -11,7 +11,6 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.validation.column_mapper import renombrar_dataframe_a_canonico
 from src.validation.schema_registry import SCHEMA_ASISTENCIA
 from src.validation.schema_validator import validar_columnas
 from ui.schema_feedback import mostrar_validacion_esquema
@@ -39,9 +38,6 @@ def _kpi_a(col, val, label, color="#2563eb"):
 
 
 def render_asistencia_page():
-    # ══════════════════════════════════════════════
-    # MÓDULO — ASISTENCIA
-    # ══════════════════════════════════════════════
     st.markdown(
         """
         <div class="sigma-header">
@@ -112,7 +108,13 @@ def render_asistencia_page():
     # ── Validación visual del archivo subido ───────────────────────────
     if asist_file is not None:
         try:
-            preview_df = pd.read_csv(asist_file, nrows=5)
+            preview_df = pd.read_csv(
+                asist_file,
+                sep=";",
+                nrows=5,
+                encoding="latin1",
+                on_bad_lines="skip",
+            )
             resultado_validacion = validar_columnas(
                 preview_df.columns.tolist(),
                 SCHEMA_ASISTENCIA,
@@ -136,31 +138,22 @@ def render_asistencia_page():
                 from build_stg_asistencia import run as run_asist
 
                 asist_file.seek(0)
-                df_raw = pd.read_csv(asist_file)
-
-                df_norm, resultado_mapeo = renombrar_dataframe_a_canonico(
-                    df_raw,
-                    SCHEMA_ASISTENCIA,
+                df_raw = pd.read_csv(
+                    asist_file,
+                    sep=";",
+                    encoding="latin1",
+                    on_bad_lines="skip",
                 )
 
-                renombradas = {
-                    k: v for k, v in resultado_mapeo["mapeadas"].items()
-                    if k != v
-                }
-
-                if renombradas:
-                    filas = [{"Columna original": k, "Renombrada como": v} for k, v in renombradas.items()]
-                    st.markdown("**Renombrado automático aplicado**")
-                    st.dataframe(filas, use_container_width=True, hide_index=True)
-
+                # Se procesa con nombres originales de Syscol
                 with tempfile.NamedTemporaryFile(
                     delete=False,
                     suffix=".csv",
                     mode="w",
-                    encoding="utf-8-sig",
+                    encoding="latin1",
                     newline="",
                 ) as tmp:
-                    df_norm.to_csv(tmp.name, index=False)
+                    df_raw.to_csv(tmp.name, index=False, sep=";")
                     tmp_path = tmp.name
 
                 try:
@@ -193,19 +186,24 @@ def render_asistencia_page():
         )
 
         total_a = len(df_asist_alumnos)
-        bajo85 = int(df_asist_alumnos["alerta"].isin(["LEGAL", "CRITICO"]).sum())
-        bajo75 = int((df_asist_alumnos["alerta"] == "CRITICO").sum())
-        tend_baja = int((df_asist_alumnos["tendencia"] == "BAJA").sum())
-        pct_global = round(df_asist_alumnos["pct_asistencia"].mean(), 1)
+        bajo85 = int(df_asist_alumnos["alerta"].isin(["LEGAL", "CRITICO"]).sum()) if "alerta" in df_asist_alumnos.columns else 0
+        bajo75 = int((df_asist_alumnos["alerta"] == "CRITICO").sum()) if "alerta" in df_asist_alumnos.columns else 0
+        tend_baja = int((df_asist_alumnos["tendencia"] == "BAJA").sum()) if "tendencia" in df_asist_alumnos.columns else 0
+        pct_global = round(df_asist_alumnos["pct_asistencia"].mean(), 1) if "pct_asistencia" in df_asist_alumnos.columns else 0
+
         pct_hoy = (
             float(df_asist_serie.iloc[-1]["pct_dia"])
-            if df_asist_serie is not None and not df_asist_serie.empty
+            if df_asist_serie is not None
+            and not df_asist_serie.empty
+            and "pct_dia" in df_asist_serie.columns
             else 0
         )
 
         fecha_ult = (
             df_asist_serie.iloc[-1]["fecha"].strftime("%d/%m")
-            if df_asist_serie is not None and not df_asist_serie.empty
+            if df_asist_serie is not None
+            and not df_asist_serie.empty
+            and "fecha" in df_asist_serie.columns
             else "-"
         )
 
@@ -222,193 +220,146 @@ def render_asistencia_page():
         ga1, ga2 = st.columns(2)
 
         with ga1:
-            fig_serie = go.Figure()
-            fig_serie.add_trace(
-                go.Scatter(
-                    x=df_asist_serie["fecha"],
-                    y=df_asist_serie["pct_dia"],
-                    mode="lines+markers+text",
-                    line=dict(color="#2563eb", width=2.5),
-                    marker=dict(size=8, color="#2563eb"),
-                    text=[f"{v}%" for v in df_asist_serie["pct_dia"]],
-                    textposition="top center",
-                    textfont=dict(size=9, color="#e2e8f0"),
-                    name="% Asistencia",
-                    hovertemplate="<b>%{x|%d/%m}</b>: %{y:.1f}%<extra></extra>",
+            if (
+                df_asist_serie is not None
+                and not df_asist_serie.empty
+                and {"fecha", "pct_dia"}.issubset(df_asist_serie.columns)
+            ):
+                fig_serie = go.Figure()
+                fig_serie.add_trace(
+                    go.Scatter(
+                        x=df_asist_serie["fecha"],
+                        y=df_asist_serie["pct_dia"],
+                        mode="lines+markers+text",
+                        line=dict(color="#2563eb", width=2.5),
+                        marker=dict(size=8, color="#2563eb"),
+                        text=[f"{v}%" for v in df_asist_serie["pct_dia"]],
+                        textposition="top center",
+                        textfont=dict(size=9, color="#e2e8f0"),
+                        name="% Asistencia",
+                        hovertemplate="<b>%{x|%d/%m}</b>: %{y:.1f}%<extra></extra>",
+                    )
                 )
-            )
-            fig_serie.add_hline(y=85, line_dash="dot", line_color="#d97706")
-            fig_serie.add_hline(y=75, line_dash="dot", line_color="#dc2626")
-            fig_serie.update_layout(
-                paper_bgcolor="#0d1220",
-                plot_bgcolor="#0d1220",
-                font=dict(color="#e2e8f0"),
-                height=280,
-                title=dict(
-                    text="Asistencia diaria del establecimiento",
-                    font=dict(size=12, color="#63b3ed"),
-                    x=0,
-                ),
-                xaxis=dict(gridcolor="#1a2035", tickfont=dict(color="#a0aec0")),
-                yaxis=dict(gridcolor="#1a2035", tickfont=dict(color="#a0aec0"), range=[70, 102]),
-                margin=dict(l=16, r=16, t=40, b=16),
-                showlegend=False,
-            )
-            st.plotly_chart(fig_serie, use_container_width=True, config={"displayModeBar": False})
+                fig_serie.add_hline(y=85, line_dash="dot", line_color="#d97706")
+                fig_serie.add_hline(y=75, line_dash="dot", line_color="#dc2626")
+                fig_serie.update_layout(
+                    paper_bgcolor="#0d1220",
+                    plot_bgcolor="#0d1220",
+                    font=dict(color="#e2e8f0"),
+                    height=280,
+                    title=dict(
+                        text="Asistencia diaria del establecimiento",
+                        font=dict(size=12, color="#63b3ed"),
+                        x=0,
+                    ),
+                    xaxis=dict(gridcolor="#1a2035", tickfont=dict(color="#a0aec0")),
+                    yaxis=dict(gridcolor="#1a2035", tickfont=dict(color="#a0aec0"), range=[70, 102]),
+                    margin=dict(l=16, r=16, t=40, b=16),
+                    showlegend=False,
+                )
+                st.plotly_chart(fig_serie, use_container_width=True, config={"displayModeBar": False})
+            else:
+                st.info("No hay serie diaria disponible para graficar.")
 
         with ga2:
-            dfc_ord = df_asist_cursos.sort_values("pct_promedio", ascending=True)
-            bar_colors = [
-                "#dc2626" if v < 85 else ("#d97706" if v < 90 else ("#16a34a" if v >= 97 else "#2563eb"))
-                for v in dfc_ord["pct_promedio"]
-            ]
+            if (
+                df_asist_cursos is not None
+                and not df_asist_cursos.empty
+                and {"curso", "pct_promedio"}.issubset(df_asist_cursos.columns)
+            ):
+                dfc_ord = df_asist_cursos.sort_values("pct_promedio", ascending=True)
+                bar_colors = [
+                    "#dc2626" if v < 85 else ("#d97706" if v < 90 else ("#16a34a" if v >= 97 else "#2563eb"))
+                    for v in dfc_ord["pct_promedio"]
+                ]
 
-            fig_cur = go.Figure(
-                go.Bar(
-                    x=dfc_ord["pct_promedio"],
-                    y=dfc_ord["curso"],
-                    orientation="h",
-                    marker_color=bar_colors,
-                    text=[f"{v}%" for v in dfc_ord["pct_promedio"]],
-                    textposition="outside",
-                    textfont=dict(color="#e2e8f0", size=9),
-                    hovertemplate="<b>%{y}</b>: %{x:.1f}%<extra></extra>",
+                fig_cur = go.Figure(
+                    go.Bar(
+                        x=dfc_ord["pct_promedio"],
+                        y=dfc_ord["curso"],
+                        orientation="h",
+                        marker_color=bar_colors,
+                        text=[f"{v}%" for v in dfc_ord["pct_promedio"]],
+                        textposition="outside",
+                        textfont=dict(color="#e2e8f0", size=9),
+                        hovertemplate="<b>%{y}</b>: %{x:.1f}%<extra></extra>",
+                    )
                 )
-            )
-            fig_cur.add_vline(x=85, line_dash="dot", line_color="#d97706")
-            fig_cur.update_layout(
-                paper_bgcolor="#0d1220",
-                plot_bgcolor="#0d1220",
-                font=dict(color="#e2e8f0"),
-                height=560,
-                title=dict(
-                    text="Asistencia promedio por curso",
-                    font=dict(size=12, color="#63b3ed"),
-                    x=0,
-                ),
-                xaxis=dict(gridcolor="#1a2035", tickfont=dict(color="#a0aec0"), range=[60, 105]),
-                yaxis=dict(tickfont=dict(color="#e2e8f0", size=10), gridcolor="rgba(0,0,0,0)"),
-                margin=dict(l=16, r=60, t=40, b=16),
-                showlegend=False,
-            )
-            st.plotly_chart(fig_cur, use_container_width=True, config={"displayModeBar": False})
-
-        st.markdown(
-            '<div class="section-title" style="margin-top:4px">Alertas de asistencia</div>',
-            unsafe_allow_html=True,
-        )
-
-        alert_tabs = st.tabs([
-            f"🔴 Críticos <75% ({bajo75})",
-            f"🟡 Bajo 85% ({bajo85 - bajo75})",
-            f"📉 Tendencia a la baja ({tend_baja})",
-            f"📊 Cursos destacados",
-        ])
-
-        col_show = ["nombre", "curso", "dias_presentes", "dias_ausentes", "pct_asistencia", "tendencia"]
-        col_lbl = {
-            "nombre": "Nombre",
-            "curso": "Curso",
-            "dias_presentes": "Presentes",
-            "dias_ausentes": "Ausentes",
-            "pct_asistencia": "% Asistencia",
-            "tendencia": "Tendencia",
-        }
-
-        with alert_tabs[0]:
-            criticos = df_asist_alumnos[df_asist_alumnos["alerta"] == "CRITICO"].sort_values("pct_asistencia")
-            if criticos.empty:
-                st.success("Sin alumnos bajo 75%")
-            else:
-                st.markdown(f"**{len(criticos)} alumnos** con asistencia crítica (bajo 75%).")
-                st.dataframe(
-                    criticos[[c for c in col_show if c in criticos.columns]].rename(columns=col_lbl),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-
-        with alert_tabs[1]:
-            legal = df_asist_alumnos[df_asist_alumnos["alerta"] == "LEGAL"].sort_values("pct_asistencia")
-            if legal.empty:
-                st.success("Sin alumnos entre 75% y 85%")
-            else:
-                st.markdown(f"**{len(legal)} alumnos** en zona de advertencia legal.")
-                st.dataframe(
-                    legal[[c for c in col_show if c in legal.columns]].rename(columns=col_lbl),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-
-        with alert_tabs[2]:
-            baja_df = df_asist_alumnos[df_asist_alumnos["tendencia"] == "BAJA"].sort_values("delta")
-            if baja_df.empty:
-                st.success("Sin alumnos con tendencia a la baja")
-            else:
-                cols_tend = ["nombre", "curso", "pct_asistencia", "pct_ultimos_3", "delta"]
-                lbl_tend = {
-                    "nombre": "Nombre",
-                    "curso": "Curso",
-                    "pct_asistencia": "% Acumulado",
-                    "pct_ultimos_3": "% Últimos 3 días",
-                    "delta": "Δ Cambio",
-                }
-                st.dataframe(
-                    baja_df[[c for c in cols_tend if c in baja_df.columns]].rename(columns=lbl_tend),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-
-        with alert_tabs[3]:
-            st.markdown("**Cursos con mejor asistencia** 🟢")
-            altos = df_asist_cursos[df_asist_cursos["alerta_curso"] == "ALTO"].sort_values("pct_promedio", ascending=False)
-            if altos.empty:
-                st.info("Sin cursos sobre 97%")
-            else:
-                st.dataframe(
-                    altos[["curso", "n_alumnos", "pct_promedio", "bajo_85", "bajo_75"]].rename(
-                        columns={
-                            "curso": "Curso",
-                            "n_alumnos": "Alumnos",
-                            "pct_promedio": "% Promedio",
-                            "bajo_85": "Bajo 85%",
-                            "bajo_75": "Bajo 75%",
-                        }
+                fig_cur.add_vline(x=85, line_dash="dot", line_color="#d97706")
+                fig_cur.update_layout(
+                    paper_bgcolor="#0d1220",
+                    plot_bgcolor="#0d1220",
+                    font=dict(color="#e2e8f0"),
+                    height=560,
+                    title=dict(
+                        text="Asistencia promedio por curso",
+                        font=dict(size=12, color="#63b3ed"),
+                        x=0,
                     ),
-                    use_container_width=True,
-                    hide_index=True,
+                    xaxis=dict(gridcolor="#1a2035", tickfont=dict(color="#a0aec0"), range=[60, 105]),
+                    yaxis=dict(tickfont=dict(color="#e2e8f0", size=10), gridcolor="rgba(0,0,0,0)"),
+                    margin=dict(l=16, r=60, t=40, b=16),
+                    showlegend=False,
                 )
-
-            st.markdown("**Cursos con asistencia baja** 🔴")
-            bajos = df_asist_cursos[df_asist_cursos["alerta_curso"] == "BAJO"].sort_values("pct_promedio")
-            if bajos.empty:
-                st.info("Sin cursos bajo 90%")
+                st.plotly_chart(fig_cur, use_container_width=True, config={"displayModeBar": False})
             else:
-                st.dataframe(
-                    bajos[["curso", "n_alumnos", "pct_promedio", "bajo_85", "bajo_75", "tendencia_baja"]].rename(
-                        columns={
-                            "curso": "Curso",
-                            "n_alumnos": "Alumnos",
-                            "pct_promedio": "% Promedio",
-                            "bajo_85": "Bajo 85%",
-                            "bajo_75": "Bajo 75%",
-                            "tendencia_baja": "Tend. Baja",
-                        }
-                    ),
-                    use_container_width=True,
-                    hide_index=True,
-                )
+                st.info("No hay datos por curso disponibles para graficar.")
 
         with st.expander("📋 Ver nómina completa de asistencia", expanded=False):
-            orden_alerta = {"CRITICO": 0, "LEGAL": 1, "OK": 2}
-            df_nom = df_asist_alumnos.copy()
-            df_nom["_ord"] = df_nom["alerta"].map(orden_alerta).fillna(2)
-            df_nom = df_nom.sort_values(["_ord", "pct_asistencia"])
+            st.dataframe(df_asist_alumnos, use_container_width=True, hide_index=True)
+
+        # ── Top alumnos con menor asistencia ──────────────────────────
+        st.markdown('<div class="section-title">Alumnos con asistencia más baja</div>', unsafe_allow_html=True)
+
+        columnas_riesgo = ["rut", "nombre", "curso", "pct_asistencia", "alerta", "tendencia"]
+        columnas_riesgo_existentes = [c for c in columnas_riesgo if c in df_asist_alumnos.columns]
+
+        if "pct_asistencia" in df_asist_alumnos.columns:
+            df_riesgo = df_asist_alumnos.sort_values("pct_asistencia").head(20)
 
             st.dataframe(
-                df_nom[[c for c in col_show if c in df_nom.columns]].rename(columns=col_lbl),
+                df_riesgo[columnas_riesgo_existentes],
                 use_container_width=True,
-                hide_index=True,
+                hide_index=True
             )
+        else:
+            st.info("No existe la columna 'pct_asistencia' para construir el ranking de riesgo.")
+
+        # ── Top cursos con mayor riesgo ───────────────────────────────
+        st.markdown('<div class="section-title">Cursos con mayor riesgo de ausentismo</div>', unsafe_allow_html=True)
+
+        if df_asist_cursos is not None and not df_asist_cursos.empty and "pct_promedio" in df_asist_cursos.columns:
+            df_cursos_riesgo = df_asist_cursos.sort_values("pct_promedio").head(10)
+
+            st.dataframe(
+                df_cursos_riesgo,
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.info("No hay datos suficientes para construir el ranking de cursos.")
+
+        # ── Distribución de riesgo ────────────────────────────────────
+        if "pct_asistencia" in df_asist_alumnos.columns:
+            def clasificar_riesgo(pct):
+                if pct < 75:
+                    return "CRÍTICO"
+                elif pct < 85:
+                    return "ALERTA"
+                elif pct < 90:
+                    return "OBSERVACIÓN"
+                else:
+                    return "NORMAL"
+
+            df_riesgo_dist = df_asist_alumnos.copy()
+            df_riesgo_dist["riesgo_asistencia"] = df_riesgo_dist["pct_asistencia"].apply(clasificar_riesgo)
+
+            riesgo = df_riesgo_dist["riesgo_asistencia"].value_counts()
+
+            st.markdown('<div class="section-title">Distribución de riesgo</div>', unsafe_allow_html=True)
+            st.bar_chart(riesgo)
+        else:
+            st.info("No existe la columna 'pct_asistencia' para calcular la distribución de riesgo.")
 
     else:
         st.markdown(

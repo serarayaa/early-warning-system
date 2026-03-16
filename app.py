@@ -464,6 +464,8 @@ df_diff = bundle["df_diff"]
 df_desiste_curr = bundle["df_desiste_curr"]
 df_desiste_prev = bundle["df_desiste_prev"]
 
+df_prev_current = bundle["df_prev_current"]
+
 # ─────────────────────────────────────────────
 # Enrutador de módulos
 # ─────────────────────────────────────────────
@@ -486,6 +488,7 @@ if _modulo == "matricula":
         df_diff=df_diff,
         df_desiste_curr=df_desiste_curr,
         df_desiste_prev=df_desiste_prev,
+        df_prev_current=df_prev_current,
     )
 
 elif _modulo == "asistencia":
