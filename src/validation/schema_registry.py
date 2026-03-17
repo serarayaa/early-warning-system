@@ -239,8 +239,84 @@ SCHEMA_DESISTE = {
     },
 }
 
+SCHEMA_ATRASOS = {
+    "nombre": "Atrasos",
+    "required": [
+        "fecha_atraso",
+        "rut",
+        "nombre",
+        "codigo_curso",
+    ],
+    "optional": [
+        "id_atraso",
+        "tipo_atraso",
+        "alumno_id",
+        "justifica",
+        "justifica_fecha",
+        "periodo",
+        "hora",
+    ],
+    "aliases": {
+        "id_atraso": [
+            "idatraso",
+            "id atraso",
+        ],
+        "fecha_atraso": [
+            "atrafecha",
+            "fecha atraso",
+            "fecha",
+        ],
+        "codigo_curso": [
+            "curnombrecorto",
+            "codigo curso",
+            "ccurso",
+            "curso",
+        ],
+        "rut": [
+            "alurut",
+            "rut",
+            "numero rut",
+            "número rut",
+        ],
+        "nombre": [
+            "alunombre",
+            "nombre",
+            "nombre alumno",
+        ],
+        "tipo_atraso": [
+            "tiponombre",
+            "tipo",
+            "tipo atraso",
+        ],
+        "alumno_id": [
+            "alumno",
+            "idalumno",
+            "id alumno",
+        ],
+        "justifica": [
+            "justifica",
+            "justificado",
+        ],
+        "justifica_fecha": [
+            "justificafecha",
+            "fecha justifica",
+            "fecha justificacion",
+        ],
+        "periodo": [
+            "per0",
+            "per1",
+            "periodo",
+            "periodo clase",
+        ],
+        "hora": [
+            "hora",
+        ],
+    },
+}
+
 SCHEMAS_DISPONIBLES = {
     "matricula": SCHEMA_MATRICULA,
     "asistencia": SCHEMA_ASISTENCIA,
     "desiste": SCHEMA_DESISTE,
+    "atrasos": SCHEMA_ATRASOS,
 }

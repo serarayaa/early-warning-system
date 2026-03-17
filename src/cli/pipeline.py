@@ -238,15 +238,11 @@ def run_matricula(
 
     # ── Pipeline completo ───────────────────────────────────────────
     # 1) Ingest
-    ingest_matricula(file_path)
+    ingested_snapshot = ingest_matricula(file_path)
 
     # 2) Staging matrícula
-    latest_raw = _latest_by_mtime(
-        PATHS.raw_matricula,
-        ["matricula_snapshot_*.csv", "matricula_snapshot_*.xlsx", "matricula_snapshot_*.xls"],
-    )
-    log.info(f"📌 Último snapshot raw detectado: {latest_raw.name}")
-    build_stg_matricula(latest_raw)
+    log.info(f"📌 Snapshot raw usado para staging: {ingested_snapshot.name}")
+    build_stg_matricula(ingested_snapshot)
 
     # 3) Curated
     build_curated_enrollment()

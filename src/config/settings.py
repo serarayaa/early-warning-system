@@ -86,7 +86,7 @@ class BusinessRules:
         EWS_ATTENDANCE_RISK_PCT      : umbral % asistencia para riesgo       (default: 84.45)
         EWS_FAIL_GRADE_THRESHOLD     : nota mínima para considerar reprobado  (default: 3.95)
         EWS_MAX_FAILED_SUBJECTS      : máx. asignaturas reprobadas sin riesgo (default: 2)
-        EWS_CUTOFF_DESISTE           : fecha corte PRE/POST retiro DESISTE    (default: 2026-03-17)
+        EWS_CUTOFF_DESISTE           : fecha corte PRE/POST retiro DESISTE    (default: 2026-03-16)
         EWS_AGE_MIN                  : edad mínima esperada para anomalías    (default: 10)
         EWS_AGE_MAX                  : edad máxima esperada para anomalías    (default: 25)
         EWS_AGE_DIFF_THRESHOLD       : diferencia máx. edad rep vs calc       (default: 1.5)
@@ -107,7 +107,7 @@ class BusinessRules:
     # PRE  (snapshot_date <= cutoff): DESISTE es universo aparte
     # POST (snapshot_date >  cutoff): DESISTE se ignora (ya entra como Fecha Retiro en matrícula)
     cutoff_desiste: str = field(
-        default_factory=lambda: _env_str("EWS_CUTOFF_DESISTE", "2026-03-17")
+        default_factory=lambda: _env_str("EWS_CUTOFF_DESISTE", "2026-03-16")
     )
 
     # Anomalías de edad

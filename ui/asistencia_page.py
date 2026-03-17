@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import sys
 import tempfile
 from datetime import date, timedelta
 from pathlib import Path
@@ -13,7 +12,11 @@ import streamlit as st
 
 from src.validation.schema_registry import SCHEMA_ASISTENCIA
 from src.validation.schema_validator import validar_columnas
+from src.staging.build_stg_asistencia import run as run_asist
+from ui.executive_pdf import generate_executive_pdf, render_pdf_preview, show_pretty_table
 from ui.schema_feedback import mostrar_validacion_esquema
+
+MIME_CSV = "text/csv"
 
 
 def _ultimo_habil(d: date | None = None) -> date:
@@ -35,6 +38,27 @@ def _kpi_a(col, val, label, color="#2563eb"):
         """,
         unsafe_allow_html=True,
     )
+
+
+def _read_uploaded_csv(uploaded_file, nrows: int | None = None) -> pd.DataFrame:
+    last_err: Exception | None = None
+    for enc in ["utf-8", "utf-8-sig", "cp1252", "latin1"]:
+        try:
+            uploaded_file.seek(0)
+            return pd.read_csv(
+                uploaded_file,
+                sep=";",
+                nrows=nrows,
+                encoding=enc,
+                on_bad_lines="skip",
+            )
+        except Exception as e:
+            last_err = e
+    raise ValueError(f"No se pudo leer CSV de asistencia con encodings esperados: {last_err}")
+
+
+def _to_csv_bytes(df: pd.DataFrame) -> bytes:
+    return df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
 
 
 def render_asistencia_page():
@@ -108,13 +132,7 @@ def render_asistencia_page():
     # ── Validación visual del archivo subido ───────────────────────────
     if asist_file is not None:
         try:
-            preview_df = pd.read_csv(
-                asist_file,
-                sep=";",
-                nrows=5,
-                encoding="latin1",
-                on_bad_lines="skip",
-            )
+            preview_df = _read_uploaded_csv(asist_file, nrows=5)
             resultado_validacion = validar_columnas(
                 preview_df.columns.tolist(),
                 SCHEMA_ASISTENCIA,
@@ -134,23 +152,14 @@ def render_asistencia_page():
             if resultado_validacion is not None and not resultado_validacion["es_valido"]:
                 st.error("El archivo no cumple con la estructura mínima esperada para Asistencia.")
             else:
-                sys.path.insert(0, "src/staging")
-                from build_stg_asistencia import run as run_asist
-
-                asist_file.seek(0)
-                df_raw = pd.read_csv(
-                    asist_file,
-                    sep=";",
-                    encoding="latin1",
-                    on_bad_lines="skip",
-                )
+                df_raw = _read_uploaded_csv(asist_file)
 
                 # Se procesa con nombres originales de Syscol
                 with tempfile.NamedTemporaryFile(
                     delete=False,
                     suffix=".csv",
                     mode="w",
-                    encoding="latin1",
+                    encoding="utf-8-sig",
                     newline="",
                 ) as tmp:
                     df_raw.to_csv(tmp.name, index=False, sep=";")
@@ -306,7 +315,7 @@ def render_asistencia_page():
                 st.info("No hay datos por curso disponibles para graficar.")
 
         with st.expander("📋 Ver nómina completa de asistencia", expanded=False):
-            st.dataframe(df_asist_alumnos, use_container_width=True, hide_index=True)
+            show_pretty_table(df_asist_alumnos, max_rows=250, height=430)
 
         # ── Top alumnos con menor asistencia ──────────────────────────
         st.markdown('<div class="section-title">Alumnos con asistencia más baja</div>', unsafe_allow_html=True)
@@ -317,11 +326,7 @@ def render_asistencia_page():
         if "pct_asistencia" in df_asist_alumnos.columns:
             df_riesgo = df_asist_alumnos.sort_values("pct_asistencia").head(20)
 
-            st.dataframe(
-                df_riesgo[columnas_riesgo_existentes],
-                use_container_width=True,
-                hide_index=True
-            )
+            show_pretty_table(df_riesgo[columnas_riesgo_existentes], max_rows=30, height=360)
         else:
             st.info("No existe la columna 'pct_asistencia' para construir el ranking de riesgo.")
 
@@ -331,11 +336,7 @@ def render_asistencia_page():
         if df_asist_cursos is not None and not df_asist_cursos.empty and "pct_promedio" in df_asist_cursos.columns:
             df_cursos_riesgo = df_asist_cursos.sort_values("pct_promedio").head(10)
 
-            st.dataframe(
-                df_cursos_riesgo,
-                use_container_width=True,
-                hide_index=True
-            )
+            show_pretty_table(df_cursos_riesgo, max_rows=20, height=320)
         else:
             st.info("No hay datos suficientes para construir el ranking de cursos.")
 
@@ -360,6 +361,128 @@ def render_asistencia_page():
             st.bar_chart(riesgo)
         else:
             st.info("No existe la columna 'pct_asistencia' para calcular la distribución de riesgo.")
+
+        st.markdown('<div class="section-title">Reportes y DATA entregable</div>', unsafe_allow_html=True)
+
+        resumen_cols = [
+            "corte",
+            "n_dias_habiles",
+            "alumnos",
+            "cursos",
+            "asistencia_global_pct",
+            "bajo_85",
+            "bajo_75",
+            "tendencia_baja",
+        ]
+        resumen = pd.DataFrame(
+            [
+                {
+                    "corte": corte_asist.strftime("%Y-%m-%d"),
+                    "n_dias_habiles": n_dias_asist,
+                    "alumnos": total_a,
+                    "cursos": int(df_asist_cursos["curso"].nunique()) if "curso" in df_asist_cursos.columns else len(df_asist_cursos),
+                    "asistencia_global_pct": pct_global,
+                    "bajo_85": bajo85,
+                    "bajo_75": bajo75,
+                    "tendencia_baja": tend_baja,
+                }
+            ]
+        )[resumen_cols]
+
+        show_pretty_table(resumen, max_rows=5, height=110)
+
+        d1, d2, d3, d4, d5 = st.columns(5)
+        d1.download_button(
+            "Resumen",
+            data=_to_csv_bytes(resumen),
+            file_name=f"asistencia_resumen__{corte_asist.strftime('%Y%m%d')}.csv",
+            mime=MIME_CSV,
+            use_container_width=True,
+            key="dl_asistencia_resumen",
+        )
+        d2.download_button(
+            "Alumnos",
+            data=_to_csv_bytes(df_asist_alumnos),
+            file_name=f"asistencia_alumnos__{corte_asist.strftime('%Y%m%d')}.csv",
+            mime=MIME_CSV,
+            use_container_width=True,
+            key="dl_asistencia_alumnos",
+        )
+        d3.download_button(
+            "Cursos",
+            data=_to_csv_bytes(df_asist_cursos),
+            file_name=f"asistencia_cursos__{corte_asist.strftime('%Y%m%d')}.csv",
+            mime=MIME_CSV,
+            use_container_width=True,
+            key="dl_asistencia_cursos",
+        )
+        d4.download_button(
+            "Serie diaria",
+            data=_to_csv_bytes(df_asist_serie),
+            file_name=f"asistencia_serie__{corte_asist.strftime('%Y%m%d')}.csv",
+            mime=MIME_CSV,
+            use_container_width=True,
+            key="dl_asistencia_serie",
+        )
+        d5.download_button(
+            "Meta",
+            data=_to_csv_bytes(pd.DataFrame([{"corte": corte_asist.strftime('%Y-%m-%d'), "n_dias": n_dias_asist}])),
+            file_name=f"asistencia_meta__{corte_asist.strftime('%Y%m%d')}.csv",
+            mime=MIME_CSV,
+            use_container_width=True,
+            key="dl_asistencia_meta",
+        )
+
+        pdf_kpis = {
+            "corte": corte_asist.strftime("%Y-%m-%d"),
+            "n_dias_habiles": n_dias_asist,
+            "alumnos": total_a,
+            "cursos": int(df_asist_cursos["curso"].nunique()) if "curso" in df_asist_cursos.columns else len(df_asist_cursos),
+            "asistencia_global_pct": pct_global,
+            "bajo_85": bajo85,
+            "bajo_75": bajo75,
+            "tendencia_baja": tend_baja,
+        }
+
+        top_alumnos_pdf = (
+            df_asist_alumnos.sort_values("pct_asistencia", ascending=True).head(25)
+            if "pct_asistencia" in df_asist_alumnos.columns
+            else df_asist_alumnos.head(25)
+        )
+        top_cursos_pdf = (
+            df_asist_cursos.sort_values("pct_promedio", ascending=True).head(25)
+            if "pct_promedio" in df_asist_cursos.columns
+            else df_asist_cursos.head(25)
+        )
+        serie_pdf = (
+            df_asist_serie.sort_values("fecha", ascending=True).tail(31)
+            if "fecha" in df_asist_serie.columns
+            else df_asist_serie.head(31)
+        )
+
+        pdf_bytes = generate_executive_pdf(
+            module_name="Asistencia",
+            corte=corte_asist.strftime("%Y-%m-%d"),
+            kpis=pdf_kpis,
+            tables=[
+                ("Resumen ejecutivo", resumen),
+                ("Top alumnos con asistencia mas baja", top_alumnos_pdf),
+                ("Cursos con mayor riesgo", top_cursos_pdf),
+                ("Serie diaria", serie_pdf),
+            ],
+        )
+
+        st.markdown('<div class="section-title">PDF Ejecutivo del módulo</div>', unsafe_allow_html=True)
+        st.download_button(
+            "Descargar PDF Ejecutivo Asistencia",
+            data=pdf_bytes,
+            file_name=f"asistencia_ejecutivo__{corte_asist.strftime('%Y%m%d')}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            key="dl_asistencia_pdf_ejecutivo",
+        )
+        with st.expander("Ver PDF Ejecutivo en pantalla", expanded=False):
+            render_pdf_preview(pdf_bytes, height=700)
 
     else:
         st.markdown(

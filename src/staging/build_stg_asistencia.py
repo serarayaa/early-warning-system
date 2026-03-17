@@ -40,7 +40,21 @@ def _norm_rut(series: pd.Series) -> pd.Series:
 
 def load_csv(path: str | Path) -> pd.DataFrame:
     """Carga y limpia el CSV de Syscol."""
-    df = pd.read_csv(path, encoding="latin-1", sep=";")
+    last_err: Exception | None = None
+    for enc in ["utf-8", "utf-8-sig", "cp1252", "latin-1"]:
+        try:
+            df = pd.read_csv(path, encoding=enc, sep=";", dtype=str)
+            break
+        except Exception as e:
+            last_err = e
+    else:
+        raise ValueError(f"No se pudo leer CSV de asistencia con encodings esperados: {last_err}")
+
+    required_cols = ["Fecha", "Rut", "CurNombreCorto", "Nombre", "Presente", "Ausente"]
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"Faltan columnas obligatorias en asistencia: {missing}")
+
     # Fila 0 es resumen global (sin Fecha)
     df = df.dropna(subset=["Fecha"]).copy()
 
@@ -52,8 +66,8 @@ def load_csv(path: str | Path) -> pd.DataFrame:
     df["rut_norm"]     = _norm_rut(df["Rut"])
     df["curso"]        = df["CurNombreCorto"].astype(str).str.upper().str.strip()
     df["nombre"]       = df["Nombre"].astype(str).str.strip()
-    df["presente"]     = df["Presente"].astype(int)
-    df["ausente"]      = df["Ausente"].astype(int)
+    df["presente"]     = pd.to_numeric(df["Presente"], errors="coerce").fillna(0).astype(int)
+    df["ausente"]      = pd.to_numeric(df["Ausente"], errors="coerce").fillna(0).astype(int)
 
     return df[["fecha", "rut_norm", "curso", "nombre", "presente", "ausente"]]
 

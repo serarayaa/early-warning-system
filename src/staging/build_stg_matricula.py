@@ -48,7 +48,7 @@ def derive_specialty(course_code: str) -> str:
 
 
 def _read_csv_robust(file_path: Path) -> pd.DataFrame:
-    encodings = ["utf-8", "latin1", "cp1252"]
+    encodings = ["utf-8", "utf-8-sig", "cp1252", "latin1"]
     last_err: Exception | None = None
     for enc in encodings:
         try:

@@ -4,12 +4,29 @@ app.py — Interfaz principal Streamlit
 """
 
 from datetime import datetime
+from pathlib import Path
 
 import streamlit as st
 
 from ui.enrollment_data import list_enrollment_dates, load_enrollment_bundle
 from ui.matricula_page import render_matricula_page
 from ui.asistencia_page import render_asistencia_page
+from ui.atrasos_page import render_atrasos_page
+
+
+def _find_school_logo() -> Path | None:
+    root = Path(__file__).resolve().parent
+    candidates = [
+        root / "assets" / "logo_establecimiento.png",
+        root / "assets" / "logo_establecimiento.jpg",
+        root / "assets" / "logo_liceo.png",
+        root / "assets" / "logo_liceo.jpg",
+        root / "assets" / "logo_duoc.png",
+    ]
+    for p in candidates:
+        if p.exists() and p.is_file():
+            return p
+    return None
 
 
 # ─────────────────────────────────────────────
@@ -370,6 +387,10 @@ button[data-baseweb="tab"][aria-selected="true"] {
 # Sidebar
 # ─────────────────────────────────────────────
 with st.sidebar:
+    school_logo = _find_school_logo()
+    if school_logo is not None:
+        st.image(str(school_logo), use_container_width=True)
+
     st.markdown("""
     <div style="padding:6px 0 18px 0">
         <div class="sigma-logo">SIGMA</div>
@@ -402,9 +423,9 @@ with st.sidebar:
 
     _nav_btn("matricula", "⚡", "Matrícula")
     _nav_btn("asistencia", "📅", "Asistencia")
+    _nav_btn("atrasos", "⏰", "Atrasos")
     _nav_btn("notas", "📝", "Notas", soon=True)
     _nav_btn("dia", "🧠", "DIA / Socioemocional", soon=True)
-    _nav_btn("atrasos", "⏰", "Atrasos", soon=True)
     _nav_btn("observaciones", "📋", "Observaciones", soon=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -441,7 +462,9 @@ with st.sidebar:
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(
         '<div style="font-family:DM Mono,monospace;font-size:0.58rem;color:#2d3748;text-align:center">'
-        'SIGMA v1.0 · Matrícula</div>',
+        f"SIGMA v1.0 · "
+        f"{ {'matricula': 'Matrícula', 'asistencia': 'Asistencia', 'atrasos': 'Atrasos', 'notas': 'Notas', 'dia': 'DIA / Socioemocional', 'observaciones': 'Observaciones'}.get(st.session_state.get('modulo', 'matricula'), 'Matrícula') }"
+        '</div>',
         unsafe_allow_html=True,
     )
 
@@ -474,25 +497,21 @@ _modulo = st.session_state.get("modulo", "matricula")
 if _modulo == "matricula":
     render_matricula_page(
         stamp=stamp,
-        prev_stamp=prev_stamp,
         metrics=metrics,
         prev_metrics=prev_metrics,
         df_current=df_current,
+        df_prev_current=df_prev_current,
         df_demo=df_demo,
         df_comunas=df_comunas,
         df_nacs=df_nacs,
         df_specs=df_specs,
-        df_anomalies=df_anomalies,
-        df_master=df_master,
-        df_transfers=df_transfers,
-        df_diff=df_diff,
-        df_desiste_curr=df_desiste_curr,
-        df_desiste_prev=df_desiste_prev,
-        df_prev_current=df_prev_current,
     )
 
 elif _modulo == "asistencia":
     render_asistencia_page()
+
+elif _modulo == "atrasos":
+    render_atrasos_page()
 
 else:
     st.markdown("""

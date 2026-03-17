@@ -50,7 +50,7 @@ def save_manifest(data: dict) -> None:
 # ---------------------------------------------------
 # Ingest principal
 # ---------------------------------------------------
-def ingest(file_path: Path) -> None:
+def ingest(file_path: Path) -> Path:
 
     if not file_path.exists():
         raise FileNotFoundError(f"Archivo no encontrado: {file_path}")
@@ -72,10 +72,11 @@ def ingest(file_path: Path) -> None:
     )
 
     if existing_entry:
+        existing_snapshot = PATHS.raw_matricula / existing_entry["snapshot_name"]
         log.info("🟦 Archivo ya fue cargado anteriormente.")
         log.info(f"   ↳ Snapshot existente: {existing_entry['snapshot_name']}")
         log.info(f"   ↳ Cargado en: {existing_entry['loaded_at']}")
-        return
+        return existing_snapshot
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     snapshot_name = f"matricula_snapshot_{timestamp}{file_path.suffix.lower()}"
@@ -96,3 +97,4 @@ def ingest(file_path: Path) -> None:
     log.info(f"✅ Snapshot guardado: {snapshot_name}")
     log.info(f"📦 Tamaño: {file_size:,} bytes")
     log.info("📘 Manifest actualizado correctamente.")
+    return destination

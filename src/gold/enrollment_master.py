@@ -32,8 +32,8 @@ def enrollment_master(snapshot_date: str, export_excel: bool = False) -> MasterP
     - DESISTE (staging) = universo aparte (PRE_RETIRO).
 
     Regla de calendario (centralizada en settings — ver BUSINESS_RULES):
-    - Hasta 17-03-2026 (inclusive): DESISTE se reporta como universo aparte.
-    - Desde 18-03-2026: DESISTE se ignora (bajas pasan a Fecha Retiro en matrícula).
+    - Hasta 16-03-2026 (inclusive): DESISTE se reporta como universo aparte.
+    - Desde 17-03-2026: DESISTE se ignora (bajas pasan a Fecha Retiro en matrícula).
     """
     from src.config.settings import BUSINESS_RULES  # import aquí para evitar circular
 
