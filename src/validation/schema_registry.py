@@ -320,3 +320,21 @@ SCHEMAS_DISPONIBLES = {
     "desiste": SCHEMA_DESISTE,
     "atrasos": SCHEMA_ATRASOS,
 }
+
+
+SCHEMA_OBSERVACIONES = {
+    "nombre": "Observaciones",
+    "required": ["idObservacion", "NCCurso", "TipoCodigo", "Fecha"],
+    "optional": ["Alumno", "AluNombreApellido", "NombreCompleto",
+                 "Descripcion", "Hora", "PerNombreApellido"],
+    "aliases": {
+        "idObservacion": ["idObservacion", "id_observacion", "id obs"],
+        "NCCurso":       ["NCCurso", "curso", "nccurso", "codigo_curso"],
+        "TipoCodigo":    ["TipoCodigo", "tipo", "tipo_codigo"],
+        "Fecha":         ["Fecha", "fecha", "date"],
+        "Alumno":        ["Alumno", "alumno", "rut", "id_alumno"],
+        "Descripcion":   ["Descripcion", "descripcion", "descripción"],
+        "PerNombreApellido": ["PerNombreApellido", "docente", "profesor"],
+        "NombreCompleto":["NombreCompleto", "nombre_completo", "nombre"],
+    },
+}

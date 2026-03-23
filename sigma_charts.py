@@ -156,205 +156,51 @@ def chart_specs_treemap(df_current):
     return fig, _insight(msg)
 
 
-def chart_specs_heatmap(df_current, df_desiste=None):
+def chart_specs_heatmap(df_current):
+    """Heatmap Plotly de indicadores de contexto por especialidad."""
+    import numpy as np
     if df_current is None or df_current.empty:
-        return go.Figure(), ""
+        fig = go.Figure()
+        return fig, ""
     df = df_current.copy()
     df["specialty"] = df.get("specialty", pd.Series(dtype=str)).fillna("SIN DATOS").str.upper().str.strip()
     df["_sx"] = _norm_sexo(df.get("sexo", pd.Series(dtype=str)))
     df["is_repeat"] = df.get("is_repeat", pd.Series(dtype=bool)).fillna(False).astype(bool)
     df["is_ext"] = _is_ext(df.get("nacionalidad", pd.Series(dtype=str)))
     specs = sorted([s for s in df["specialty"].unique() if s != "SIN DATOS"])
-    des_map = {}
-    if df_desiste is not None and not df_desiste.empty:
-        dd = df_desiste.copy()
-        dd["specialty"] = dd.get("specialty", pd.Series(dtype=str)).fillna("").str.upper().str.strip()
-        for sp in specs:
-            n_mat = int((df["specialty"] == sp).sum())
-            n_des = int((dd["specialty"] == sp).sum())
-            des_map[sp] = round(n_des / (n_mat + n_des) * 100, 1) if (n_mat + n_des) > 0 else 0
-    indicadores = ["% Mujeres", "% Repitentes", "% Extranjeros", "% Desistimiento"]
-    z, text = [], []
+    if not specs:
+        return go.Figure(), ""
+
+    indicadores = ["% Mujeres", "% Repitentes", "% Extranjeros"]
+    data = []
     for sp in specs:
         d = df[df["specialty"] == sp]
         n = len(d) or 1
-        vals = [round((d["_sx"]=="F").sum()/n*100,1), round(d["is_repeat"].sum()/n*100,1),
-                round(d["is_ext"].sum()/n*100,1), des_map.get(sp, 0)]
-        z.append(vals)
-        text.append([f"{v:.1f}%" for v in vals])
-    fig = go.Figure(go.Heatmap(
-        z=z, x=indicadores, y=specs, text=text, texttemplate="%{text}",
-        textfont=dict(size=14, color="white"),
-        colorscale=[[0,"#0f172a"],[0.4,"#1e3a5f"],[0.75,"#2563eb"],[1.0,"#93c5fd"]],
-        showscale=False, xgap=3, ygap=3,
-        hovertemplate="<b>%{y}</b> — %{x}: %{text}<extra></extra>",
+        data.append([
+            round((d["_sx"] == "F").sum() / n * 100, 1),
+            round(d["is_repeat"].sum() / n * 100, 1),
+            round(d["is_ext"].sum() / n * 100, 1),
+        ])
+
+    z = np.array(data)
+    text = [[f"{v:.1f}%" for v in row] for row in z]
+
+    fig = go.Figure(data=go.Heatmap(
+        z=z, x=indicadores, y=specs,
+        text=text, texttemplate="%{text}",
+        colorscale=[[0, "#dbeafe"], [0.5, "#2563eb"], [1, "#1e3a5f"]],
+        showscale=False,
     ))
-    fig.update_layout(yaxis=dict(tickfont=dict(size=13, color="#e2e8f0"), gridcolor="rgba(0,0,0,0)"),
-                      xaxis=dict(tickfont=dict(size=11, color="#a0aec0"), gridcolor="rgba(0,0,0,0)", side="bottom"),
-                      margin=dict(l=16, r=16, t=48, b=16))
-    _apply(fig, "Indicadores de contexto por especialidad", 260)
-    if des_map:
-        sp_riesgo = max(des_map, key=des_map.get)
-        msg = (f"<b>{sp_riesgo}</b> presenta la mayor tasa de desistimiento ({des_map[sp_riesgo]:.1f}%). "
-               f"Compara con su % de repitentes: si ambos son altos, el abandono está fuertemente asociado al historial académico previo.")
-    else:
-        msg = "Celda más oscura = indicador bajo. Más clara = alto. Identifica qué especialidad acumula más factores de riesgo simultáneamente."
-    return fig, _insight(msg)
+    fig.update_layout(
+        paper_bgcolor="#0d1220", plot_bgcolor="#0d1220",
+        font=dict(color="#e2e8f0"),
+        height=220, margin=dict(l=10, r=10, t=40, b=10),
+        title=dict(text="Indicadores de contexto por especialidad", font=dict(size=12, color="#63b3ed"), x=0),
+    )
+    sp_ext = max(specs, key=lambda s: data[specs.index(s)][2])
+    msg = f"<b>{sp_ext}</b> concentra el mayor % de alumnos extranjeros ({data[specs.index(sp_ext)][2]:.1f}%)."
+    return fig, f'<p style="font-size:0.78rem;color:#94a3b8">{msg}</p>'
 
-
-def chart_specs_indicadores(df_current):
-    if df_current is None or df_current.empty:
-        return go.Figure(), ""
-    df = df_current.copy()
-    df["specialty"] = df.get("specialty", pd.Series(dtype=str)).fillna("SIN DATOS").str.upper().str.strip()
-    df["is_repeat"] = df.get("is_repeat", pd.Series(dtype=bool)).fillna(False).astype(bool)
-    df["is_ext"] = _is_ext(df.get("nacionalidad", pd.Series(dtype=str)))
-    specs = [s for s in df["specialty"].unique() if s != "SIN DATOS"]
-    rows = []
-    for sp in specs:
-        d = df[df["specialty"] == sp]
-        rows.append({"Especialidad": sp, "Repitentes": int(d["is_repeat"].sum()), "Extranjeros": int(d["is_ext"].sum())})
-    dfp = pd.DataFrame(rows)
-    fig = go.Figure()
-    fig.add_trace(go.Bar(name="Repitentes", x=dfp["Especialidad"], y=dfp["Repitentes"],
-                         marker_color=C_AMBER, text=dfp["Repitentes"], textposition="outside",
-                         textfont=dict(color="#e2e8f0", size=12),
-                         hovertemplate="<b>%{x}</b><br>Repitentes: %{y}<extra></extra>"))
-    fig.add_trace(go.Bar(name="Extranjeros", x=dfp["Especialidad"], y=dfp["Extranjeros"],
-                         marker_color=C_RED, text=dfp["Extranjeros"], textposition="outside",
-                         textfont=dict(color="#e2e8f0", size=12),
-                         hovertemplate="<b>%{x}</b><br>Extranjeros: %{y}<extra></extra>"))
-    fig.update_layout(barmode="group",
-                      yaxis=dict(gridcolor="#1a2035", tickfont=dict(color="#a0aec0")),
-                      xaxis=dict(tickfont=dict(color="#a0aec0"), gridcolor="rgba(0,0,0,0)"),
-                      legend=dict(orientation="h", y=-0.2, x=0.5, xanchor="center"),
-                      margin=dict(l=16, r=16, t=48, b=32))
-    _apply(fig, "Repitentes y Extranjeros por especialidad (n)", 300)
-    sp_max_rep = dfp.loc[dfp["Repitentes"].idxmax(), "Especialidad"]
-    sp_max_ext = dfp.loc[dfp["Extranjeros"].idxmax(), "Especialidad"]
-    msg = (f"<b>{sp_max_rep}</b> concentra más repitentes en términos absolutos. "
-           f"<b>{sp_max_ext}</b> tiene más alumnos extranjeros. "
-           f"Ambos grupos presentan mayor riesgo de abandono y requieren seguimiento diferenciado.")
-    return fig, _insight(msg)
-
-
-# ══════════════════════════════════════════════════════════════════════
-# DESISTIMIENTO — 3 gráficos
-# ══════════════════════════════════════════════════════════════════════
-
-def chart_des_por_nivel(dd, df_current):
-    if dd is None or dd.empty:
-        return go.Figure(), ""
-    dd = dd.copy()
-    dd["level"] = pd.to_numeric(dd.get("level", 0), errors="coerce").fillna(0).astype(int)
-    tasas = []
-    if df_current is not None and not df_current.empty:
-        dfc = df_current.copy()
-        dfc["level"] = pd.to_numeric(dfc.get("level", 0), errors="coerce").fillna(0).astype(int)
-        for niv in sorted([n for n in dd["level"].unique() if n > 0]):
-            n_mat = int((dfc["level"] == niv).sum())
-            n_des = int((dd["level"] == niv).sum())
-            tasa = round(n_des / (n_mat + n_des) * 100, 1) if (n_mat + n_des) > 0 else 0
-            tasas.append({"Nivel": f"{niv}° Medio", "Desistes": n_des, "Tasa": tasa})
-    else:
-        for niv, grp in dd[dd["level"] > 0].groupby("level"):
-            tasas.append({"Nivel": f"{niv}° Medio", "Desistes": len(grp), "Tasa": 0})
-    dfp = pd.DataFrame(tasas)
-    prom = dfp["Tasa"].mean()
-    colors = [C_RED if t > prom else C_AMBER for t in dfp["Tasa"]]
-    fig = go.Figure(go.Bar(
-        x=dfp["Nivel"], y=dfp["Tasa"], marker_color=colors,
-        text=dfp.apply(lambda r: f"{r['Tasa']}%<br>({r['Desistes']})", axis=1),
-        textposition="outside", textfont=dict(color="#e2e8f0", size=11),
-        hovertemplate="<b>%{x}</b><br>Tasa: %{y:.1f}%<extra></extra>",
-    ))
-    fig.add_hline(y=prom, line_dash="dot", line_color="#63b3ed",
-                  annotation_text=f"Promedio {prom:.1f}%",
-                  annotation_font=dict(color="#63b3ed", size=10))
-    fig.update_layout(yaxis=dict(title="Tasa (%)", gridcolor="#1a2035", tickfont=dict(color="#a0aec0")),
-                      xaxis=dict(tickfont=dict(color="#a0aec0"), gridcolor="rgba(0,0,0,0)"),
-                      margin=dict(l=16, r=16, t=48, b=16))
-    _apply(fig, "Tasa de desistimiento por nivel", 310)
-    niv_max = dfp.loc[dfp["Tasa"].idxmax()]
-    msg = (f"El <b>{niv_max['Nivel']}</b> tiene la mayor tasa de abandono ({niv_max['Tasa']}%). "
-           f"Barras rojas = sobre el promedio. Niveles en rojo requieren intervención prioritaria.")
-    return fig, _insight(msg)
-
-
-def chart_des_por_especialidad(dd, df_current):
-    if dd is None or dd.empty:
-        return go.Figure(), ""
-    dd = dd.copy()
-    dd["specialty"] = dd.get("specialty", pd.Series(dtype=str)).fillna("SIN DATOS").str.upper().str.strip()
-    rows = []
-    for sp in [s for s in dd["specialty"].unique() if s not in ("SIN DATOS", "")]:
-        n_des = int((dd["specialty"] == sp).sum())
-        n_mat = 0
-        if df_current is not None and not df_current.empty:
-            dfc = df_current.copy()
-            dfc["specialty"] = dfc.get("specialty", pd.Series(dtype=str)).fillna("").str.upper().str.strip()
-            n_mat = int((dfc["specialty"] == sp).sum())
-        tasa = round(n_des / (n_mat + n_des) * 100, 1) if (n_mat + n_des) > 0 else 0
-        rows.append({"Especialidad": sp, "Desistes": n_des, "Tasa": tasa})
-    dfp = pd.DataFrame(rows).sort_values("Tasa", ascending=True)
-    colors = [SPEC_COLORS.get(s, C_MUTED) for s in dfp["Especialidad"]]
-    fig = go.Figure(go.Bar(
-        x=dfp["Tasa"], y=dfp["Especialidad"], orientation="h",
-        marker_color=colors,
-        text=dfp.apply(lambda r: f"{r['Tasa']}%  ({r['Desistes']} alumnos)", axis=1),
-        textposition="outside", textfont=dict(color="#e2e8f0", size=12),
-        customdata=dfp["Desistes"],
-        hovertemplate="<b>%{y}</b><br>Tasa: %{x:.1f}%  |  %{customdata} desistes<extra></extra>",
-    ))
-    prom = dfp["Tasa"].mean()
-    fig.add_vline(x=prom, line_dash="dot", line_color="#63b3ed",
-                  annotation_text=f"Prom. {prom:.1f}%",
-                  annotation_font=dict(color="#63b3ed", size=10),
-                  annotation_position="top right")
-    fig.update_layout(xaxis=dict(title="Tasa (%)", gridcolor="#1a2035", tickfont=dict(color="#a0aec0")),
-                      yaxis=dict(tickfont=dict(color="#e2e8f0", size=12), gridcolor="rgba(0,0,0,0)"),
-                      margin=dict(l=16, r=80, t=48, b=16))
-    _apply(fig, "Tasa de desistimiento por especialidad", 280)
-    sp_max = dfp.loc[dfp["Tasa"].idxmax()]
-    sp_min = dfp.loc[dfp["Tasa"].idxmin()]
-    msg = (f"<b>{sp_max['Especialidad']}</b> lidera el abandono con {sp_max['Tasa']}%. "
-           f"<b>{sp_min['Especialidad']}</b> retiene mejor ({sp_min['Tasa']}%). "
-           f"Una diferencia mayor a 2pp entre especialidades sugiere factores estructurales propios de cada una.")
-    return fig, _insight(msg)
-
-
-def chart_des_repitentes(n_rep: int, n_norep: int):
-    total = n_rep + n_norep or 1
-    pct_rep = round(n_rep / total * 100, 1)
-    fig = go.Figure(go.Pie(
-        labels=["Repitentes", "No repitentes"], values=[n_rep, n_norep],
-        hole=0.60,
-        marker=dict(colors=[C_AMBER, C_GREEN], line=dict(color="#0d1220", width=3)),
-        textinfo="percent", textfont=dict(size=12, color="white"),
-        hovertemplate="<b>%{label}</b><br>%{value} alumnos — %{percent}<extra></extra>",
-        domain=dict(x=[0.0, 0.72]),
-    ))
-    fig.add_annotation(text=f"<b>{total}</b><br>desistes",
-                       x=0.36, y=0.5, showarrow=False,
-                       font=dict(size=15, color="#e2e8f0"), align="center")
-    fig.update_layout(legend=dict(x=0.76, y=0.5, xanchor="left", yanchor="middle"),
-                      margin=dict(l=8, r=8, t=48, b=8))
-    _apply(fig, "¿Quién abandona? Repitentes vs nuevos", 300)
-    if pct_rep > 40:
-        msg = (f"El <b>{pct_rep}%</b> de quienes abandonan son repitentes — alta correlación entre historial de repitencia y deserción. "
-               f"Intervención temprana en alumnos repitentes podría reducir significativamente el abandono.")
-    elif pct_rep > 20:
-        msg = (f"<b>{pct_rep}%</b> de los desistidos son repitentes. Proporción moderada: "
-               f"el abandono no está completamente explicado por el historial académico previo.")
-    else:
-        msg = (f"Solo el <b>{pct_rep}%</b> de los desistidos son repitentes. "
-               f"El abandono ocurre principalmente en alumnos sin historial previo de repitencia — puede haber factores socioeconómicos.")
-    return fig, _insight(msg)
-
-
-# ══════════════════════════════════════════════════════════════════════
-# DEMOGRAFÍA — 2 gráficos
-# ══════════════════════════════════════════════════════════════════════
 
 def chart_demo_edad(df_current):
     if df_current is None or df_current.empty or "edad" not in df_current.columns:

@@ -178,6 +178,25 @@ def run(csv_path: str | Path,
     log.info(f"Procesando asistencia hasta corte: {corte}")
 
     df_raw = load_csv(csv_path)
+
+    # ── Acumular con raw existente + deduplicar por fecha+rut ────────
+    raw_acum_path = gold_dir / "_raw_acumulado.csv"
+    if raw_acum_path.exists():
+        try:
+            df_existing_raw = pd.read_csv(raw_acum_path, encoding="utf-8", dtype=str)
+            df_raw = pd.concat([df_existing_raw, df_raw], ignore_index=True)
+            # Clave única: fecha + rut del alumno
+            col_fecha = next((c for c in df_raw.columns if "fecha" in c.lower() or c == "Fecha"), None)
+            col_rut   = next((c for c in df_raw.columns if "rut" in c.lower()), None)
+            if col_fecha and col_rut:
+                antes = len(df_raw)
+                df_raw = df_raw.drop_duplicates(subset=[col_fecha, col_rut], keep="last")
+                log.info(f"  Acumulado: {len(df_raw)} registros ({antes-len(df_raw)} duplicados eliminados)")
+        except Exception as e:
+            log.warning(f"  No se pudo cargar raw acumulado: {e} — usando solo CSV nuevo")
+    # Guardar raw acumulado para próximas cargas
+    df_raw.to_csv(raw_acum_path, index=False, encoding="utf-8")
+
     resultados = calcular_asistencia(df_raw, corte)
 
     # Guardar CSVs (compatibilidad sin pyarrow)

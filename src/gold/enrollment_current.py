@@ -187,6 +187,24 @@ def enrollment_current(snapshot_date: str, export_excel: bool = False) -> None:
     out_cur = out_dir / f"enrollment_current__{stamp}.parquet"
     out_met = out_dir / f"enrollment_metrics__{stamp}.parquet"
 
+    # ── Agregar direccion desde staging si existe ────────────────────
+    stg_dir = PATHS.staging / "matricula"
+    stg_files = sorted(stg_dir.glob("*.parquet"), key=lambda p: p.stat().st_mtime)
+    if stg_files:
+        try:
+            df_stg = pd.read_parquet(stg_files[-1])
+            if "direccion" in df_stg.columns and "rut_norm" in df_stg.columns:
+                dir_map = df_stg.drop_duplicates("rut_norm").set_index("rut_norm")["direccion"]
+                if "rut_norm" in cur.columns:
+                    cur["direccion"] = cur["rut_norm"].map(dir_map).fillna("")
+                    log.info(f"✅ Columna 'direccion' agregada desde staging ({cur['direccion'].ne('').sum()} registros)")
+            if "dir_calidad" in df_stg.columns and "rut_norm" in df_stg.columns:
+                dq_map = df_stg.drop_duplicates("rut_norm").set_index("rut_norm")["dir_calidad"]
+                if "rut_norm" in cur.columns:
+                    cur["dir_calidad"] = cur["rut_norm"].map(dq_map).fillna("")
+        except Exception as e:
+            log.warning(f"No se pudo agregar direccion desde staging: {e}")
+
     cur.to_parquet(out_cur, index=False)
     metrics.to_parquet(out_met, index=False)
 

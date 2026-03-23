@@ -48,16 +48,36 @@ def derive_specialty(course_code: str) -> str:
 
 
 def _read_csv_robust(file_path: Path) -> pd.DataFrame:
-    encodings = ["utf-8", "utf-8-sig", "cp1252", "latin1"]
+    """
+    Lee CSV con manejo robusto de encodings, separadores y comillas.
+    Prueba múltiples combinaciones hasta encontrar la que funciona.
+    """
+    encodings = ["latin1", "utf-8-sig", "utf-8", "cp1252"]
+    separators = [";", ",", "\t"]
+    import csv as _csv
+
     last_err: Exception | None = None
     for enc in encodings:
-        try:
-            log.info(f"🔎 Intentando leer CSV con encoding={enc}")
-            return pd.read_csv(file_path, dtype=str, encoding=enc, sep=None, engine="python")
-        except (UnicodeDecodeError, pd.errors.ParserError) as e:
-            last_err = e
-            continue
-    raise ValueError(f"No se pudo leer el CSV con encodings {encodings}. Error: {last_err}")
+        for sep in separators:
+            # Intento 1: quoting estándar
+            for quoting in [_csv.QUOTE_MINIMAL, _csv.QUOTE_ALL, _csv.QUOTE_NONE]:
+                try:
+                    kwargs = dict(
+                        dtype=str, encoding=enc, sep=sep,
+                        quoting=quoting, on_bad_lines="skip",
+                    )
+                    if quoting == _csv.QUOTE_NONE:
+                        kwargs["escapechar"] = "\\"
+                    df = pd.read_csv(file_path, **kwargs)
+                    if len(df.columns) >= 3:  # al menos 3 columnas = archivo válido
+                        log.info(f"✓ CSV leído: enc={enc} sep={repr(sep)} "
+                                 f"quoting={quoting} cols={len(df.columns)}")
+                        return df
+                except Exception as e:
+                    last_err = e
+                    continue
+
+    raise ValueError(f"No se pudo leer el CSV. Último error: {last_err}")
 
 
 def _read_excel(file_path: Path) -> pd.DataFrame:
@@ -119,6 +139,7 @@ def build_staging(snapshot_file: Path, out_dir: Path | None = None) -> Path:
     col_nac      = _pick_col(df, ["Nacionalidad", "País", "Pais"])
     col_edad     = _pick_col(df, ["Edad"])
     col_nac_date = _pick_col(df, ["Nacimiento", "Fecha Nacimiento", "F. Nacimiento", "Fecha de Nacimiento"])
+    col_dir      = _pick_col(df, ["Dirección", "Direccion", "direccion", "dir", "DireccionAlumno"])
 
     missing = []
     if col_rut is None:
@@ -185,11 +206,99 @@ def build_staging(snapshot_file: Path, out_dir: Path | None = None) -> Path:
         out["nacimiento_raw"] = ""
         out["nacimiento"]     = pd.NaT
 
+    # ── Dirección ─────────────────────────────────────────────────────
+    if col_dir:
+        out["direccion_raw"] = df[col_dir].astype(str)
+        out["direccion"]     = out["direccion_raw"].str.strip()
+    else:
+        out["direccion_raw"] = ""
+        out["direccion"]     = ""
+
+    # ── Calidad de datos ──────────────────────────────────────────────
+    def _calidad_dir(d: str) -> str:
+        """Clasifica la calidad de una dirección."""
+        d = str(d).strip()
+        if not d or d.lower() in ("nan", "", "-", "s/d", "s/i", "sin dato", "sin dirección"):
+            return "VACÍA"
+        if len(d) < 6:
+            return "MUY_CORTA"
+        import re
+        if not re.search(r"\d", d):
+            return "SIN_NÚMERO"
+        if re.match(r"^\d+$", d):
+            return "SOLO_NÚMERO"
+        return "OK"
+
+    out["dir_calidad"] = out["direccion"].apply(_calidad_dir)
+
     out["source_snapshot"] = snapshot_file.name
     out["ingested_at"]     = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     out_path = out_dir / snapshot_file.with_suffix(".parquet").name
     out.to_parquet(out_path, index=False)
+
+    # ── Reporte de calidad de datos ───────────────────────────────────
+    import re as _re
+
+    def _check_rut(r: str) -> str:
+        r = str(r).strip()
+        if not r or r in ("", "0", "nan"):
+            return "VACÍO"
+        if not _re.search(r"\d", r):
+            return "SIN_DÍGITOS"
+        return "OK"
+
+    def _check_nombre(n: str) -> str:
+        n = str(n).strip()
+        if not n or n in ("", "nan"):
+            return "VACÍO"
+        if len(n.split()) < 2:
+            return "INCOMPLETO"
+        return "OK"
+
+    def _check_curso(c: str) -> str:
+        c = str(c).strip()
+        if not c or c in ("", "nan"):
+            return "VACÍO"
+        return "OK"
+
+    def _check_comuna(c: str) -> str:
+        c = str(c).strip()
+        if not c or c in ("", "nan"):
+            return "VACÍA"
+        return "OK"
+
+    out["_rut_ok"]    = out["rut_norm"].apply(_check_rut)
+    out["_nom_ok"]    = out["nombre"].apply(_check_nombre)
+    out["_curso_ok"]  = out["course_code"].apply(_check_curso)
+    out["_com_ok"]    = out["comuna"].apply(_check_comuna)
+
+    # Alumnos con al menos un campo problemático
+    df_calidad = out[
+        (out["_rut_ok"]   != "OK") |
+        (out["_nom_ok"]   != "OK") |
+        (out["_curso_ok"] != "OK") |
+        (out["_com_ok"]   != "OK") |
+        (out["dir_calidad"] != "OK")
+    ].copy()
+
+    df_calidad["problemas"] = df_calidad.apply(lambda r: ", ".join(filter(None, [
+        f"RUT {r['_rut_ok']}"        if r["_rut_ok"]    != "OK" else "",
+        f"Nombre {r['_nom_ok']}"     if r["_nom_ok"]    != "OK" else "",
+        f"Curso {r['_curso_ok']}"    if r["_curso_ok"]  != "OK" else "",
+        f"Comuna {r['_com_ok']}"     if r["_com_ok"]    != "OK" else "",
+        f"Dirección {r['dir_calidad']}" if r["dir_calidad"] != "OK" else "",
+    ])), axis=1)
+
+    cols_calidad = [c for c in ["nombre","course_code","rut_norm","comuna","direccion","dir_calidad","problemas"] if c in df_calidad.columns]
+    df_calidad[cols_calidad].to_csv(
+        out_dir / (snapshot_file.with_suffix("").name.replace("enrollment_current__", "datos_faltantes__") + "_calidad.csv"),
+        index=False, encoding="utf-8-sig"
+    )
+
+    # Limpiar columnas auxiliares
+    out = out.drop(columns=["_rut_ok","_nom_ok","_curso_ok","_com_ok"], errors="ignore")
+    out.to_parquet(out_path, index=False)  # re-guardar con direccion y dir_calidad
 
     ruts_vacios     = int((out["rut_norm"] == "").sum())
     cursos_vacios   = int((out["course_code"] == "").sum())
