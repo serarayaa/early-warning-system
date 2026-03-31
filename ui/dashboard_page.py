@@ -73,7 +73,11 @@ def render_dashboard_page(
 ):
     # ── Header ────────────────────────────────────────────────────────
     try:
-        fecha_label = pd.to_datetime(stamp, format="%Y%m%d").strftime("%d de %B %Y")
+        # Formatear fecha en español sin depender del locale del sistema
+        _MESES_ES = {1:"enero",2:"febrero",3:"marzo",4:"abril",5:"mayo",6:"junio",
+                     7:"julio",8:"agosto",9:"septiembre",10:"octubre",11:"noviembre",12:"diciembre"}
+        _dt = pd.to_datetime(stamp, format="%Y%m%d")
+        fecha_label = f"{_dt.day} de {_MESES_ES[_dt.month]} de {_dt.year}"
     except Exception:
         fecha_label = stamp
 
@@ -397,6 +401,261 @@ def render_dashboard_page(
                 </div>""",
                 unsafe_allow_html=True,
             )
+
+    # ── BLOQUE 5: Análisis estadístico consolidado ────────────────────
+    st.markdown('<div class="section-title" style="margin-top:16px">📊 Análisis estadístico consolidado</div>',
+                unsafe_allow_html=True)
+
+    tab_dist, tab_corr, tab_outliers = st.tabs([
+        "📈 Distribuciones",
+        "🔗 Correlaciones",
+        "⚠️ Outliers",
+    ])
+
+    # ── TAB DISTRIBUCIONES ────────────────────────────────────────────
+    with tab_dist:
+        if df_asist_alumnos is not None and not df_asist_alumnos.empty and "pct_asistencia" in df_asist_alumnos.columns:
+            import numpy as np
+
+            pct = df_asist_alumnos["pct_asistencia"].dropna()
+            n   = len(pct)
+
+            # Medidas de tendencia central y dispersión
+            media   = round(float(pct.mean()), 1)
+            mediana = round(float(pct.median()), 1)
+            std     = round(float(pct.std()), 1)
+            q1      = round(float(pct.quantile(0.25)), 1)
+            q3      = round(float(pct.quantile(0.75)), 1)
+            iqr     = round(q3 - q1, 1)
+            p_min   = round(float(pct.min()), 1)
+            p_max   = round(float(pct.max()), 1)
+
+            st.markdown('<div class="section-title">Asistencia — estadísticas descriptivas</div>',
+                        unsafe_allow_html=True)
+
+            c1,c2,c3,c4 = st.columns(4)
+            c1.metric("Media",    f"{media}%",   help="Promedio aritmético — sensible a valores extremos")
+            c2.metric("Mediana",  f"{mediana}%", help="Valor central — más representativo cuando hay outliers")
+            c3.metric("Desv. Std",f"{std}%",     help="Dispersión respecto a la media")
+            c4.metric("IQR",      f"{iqr}%",     help="Rango intercuartílico Q3-Q1 — dispersión robusta")
+
+            c5,c6,c7,c8 = st.columns(4)
+            c5.metric("Q1 (25%)", f"{q1}%",  help="El 25% de alumnos tiene asistencia bajo este valor")
+            c6.metric("Q3 (75%)", f"{q3}%",  help="El 75% de alumnos tiene asistencia bajo este valor")
+            c7.metric("Mínimo",   f"{p_min}%")
+            c8.metric("Máximo",   f"{p_max}%")
+
+            # Insight automático media vs mediana
+            if abs(media - mediana) > 5:
+                st.markdown(
+                    f'<div class="sigma-alert warn">⚠️ La media ({media}%) y la mediana ({mediana}%) difieren en '
+                    f'{abs(media-mediana):.1f}pp — la distribución es asimétrica. '
+                    f'La mediana es más representativa del alumno típico.</div>',
+                    unsafe_allow_html=True)
+            else:
+                st.markdown(
+                    f'<div class="sigma-alert info">✅ Media ({media}%) y mediana ({mediana}%) son similares — '
+                    f'distribución aproximadamente simétrica.</div>',
+                    unsafe_allow_html=True)
+
+            # Histograma por rangos
+            st.markdown('<div class="section-title" style="margin-top:8px">Distribución por rango de asistencia</div>',
+                        unsafe_allow_html=True)
+
+            rangos = [
+                ("100%",    (pct == 100).sum(),              "#16a34a"),
+                ("95-99%",  ((pct >= 95) & (pct < 100)).sum(), "#22c55e"),
+                ("90-94%",  ((pct >= 90) & (pct < 95)).sum(),  "#86efac"),
+                ("85-89%",  ((pct >= 85) & (pct < 90)).sum(),  "#fbbf24"),
+                ("75-84%",  ((pct >= 75) & (pct < 85)).sum(),  "#f97316"),
+                ("60-74%",  ((pct >= 60) & (pct < 75)).sum(),  "#ef4444"),
+                ("<60%",    (pct < 60).sum(),                  "#991b1b"),
+            ]
+            max_n = max(r[1] for r in rangos) or 1
+            for label, cnt, color in rangos:
+                pct_bar = cnt / n * 100
+                width   = int(cnt / max_n * 100)
+                st.markdown(f"""
+                <div style="display:flex;align-items:center;gap:10px;margin:3px 0;font-size:0.8rem">
+                  <span style="min-width:55px;color:#94a3b8">{label}</span>
+                  <div style="flex:1;background:#1a2035;border-radius:4px;height:20px">
+                    <div style="width:{width}%;background:{color};height:100%;border-radius:4px;
+                         transition:width 0.4s"></div>
+                  </div>
+                  <span style="min-width:90px;color:#e2e8f0">{cnt:,} alumnos ({pct_bar:.1f}%)</span>
+                </div>""", unsafe_allow_html=True)
+        else:
+            st.info("Sin datos de asistencia para análisis.")
+
+        # Atrasos — distribución
+        if df_atr_alumnos is not None and not df_atr_alumnos.empty and "n_atrasos" in df_atr_alumnos.columns:
+            atr = df_atr_alumnos["n_atrasos"].dropna()
+            n_atr = len(df_asist_alumnos) if df_asist_alumnos is not None else len(atr)
+
+            st.markdown('<div class="section-title" style="margin-top:16px">Atrasos — estadísticas descriptivas</div>',
+                        unsafe_allow_html=True)
+
+            ca1,ca2,ca3,ca4 = st.columns(4)
+            ca1.metric("Media atrasos",   f"{atr.mean():.1f}",  help="Entre alumnos con al menos 1 atraso")
+            ca2.metric("Mediana atrasos", f"{atr.median():.0f}")
+            ca3.metric("Desv. Std",       f"{atr.std():.1f}")
+            ca4.metric("Máximo",          f"{int(atr.max())} atrasos")
+
+            rangos_atr = [
+                ("Sin atrasos", n_atr - len(atr),          "#16a34a"),
+                ("1-2",        ((atr >= 1) & (atr <= 2)).sum(), "#fbbf24"),
+                ("3-5",        ((atr >= 3) & (atr <= 5)).sum(), "#f97316"),
+                ("6-9",        ((atr >= 6) & (atr <= 9)).sum(), "#ef4444"),
+                ("10+",        (atr >= 10).sum(),              "#991b1b"),
+            ]
+            max_na = max(r[1] for r in rangos_atr) or 1
+            for label, cnt, color in rangos_atr:
+                pct_bar = cnt / n_atr * 100
+                width   = int(cnt / max_na * 100)
+                st.markdown(f"""
+                <div style="display:flex;align-items:center;gap:10px;margin:3px 0;font-size:0.8rem">
+                  <span style="min-width:70px;color:#94a3b8">{label}</span>
+                  <div style="flex:1;background:#1a2035;border-radius:4px;height:20px">
+                    <div style="width:{width}%;background:{color};height:100%;border-radius:4px"></div>
+                  </div>
+                  <span style="min-width:90px;color:#e2e8f0">{cnt:,} alumnos ({pct_bar:.1f}%)</span>
+                </div>""", unsafe_allow_html=True)
+
+    # ── TAB CORRELACIONES ─────────────────────────────────────────────
+    with tab_corr:
+        if (df_asist_alumnos is not None and not df_asist_alumnos.empty and
+            df_atr_alumnos is not None and not df_atr_alumnos.empty):
+
+            df_merged = df_asist_alumnos.merge(
+                df_atr_alumnos[["rut_norm","n_atrasos","dias_con_atraso","pct_justificados"]],
+                on="rut_norm", how="left"
+            )
+            df_merged["n_atrasos"]        = df_merged["n_atrasos"].fillna(0)
+            df_merged["dias_con_atraso"]  = df_merged["dias_con_atraso"].fillna(0)
+            df_merged["pct_justificados"] = df_merged["pct_justificados"].fillna(0)
+
+            pct_col = df_merged["pct_asistencia"]
+
+            corrs = {
+                "% asistencia últimos 3 días":  ("pct_ultimos_3", "Fuerte — tendencia reciente predice el estado actual"),
+                "N° de atrasos":                ("n_atrasos",      "Casi nula — atrasos ≠ ausentismo, son problemas independientes"),
+                "Días con atraso":              ("dias_con_atraso","Casi nula — ídem"),
+                "% atrasos justificados":       ("pct_justificados","Sin correlación relevante"),
+            }
+
+            st.markdown('<div class="section-title">Correlación de Pearson con % de asistencia</div>',
+                        unsafe_allow_html=True)
+            st.markdown(
+                '<div class="sigma-alert info">El coeficiente r varía entre -1 (correlación negativa perfecta) '
+                'y +1 (positiva perfecta). Valores cercanos a 0 indican que las variables son independientes.</div>',
+                unsafe_allow_html=True)
+
+            for nombre, (col, interpretacion) in corrs.items():
+                if col in df_merged.columns:
+                    r = round(float(pct_col.corr(df_merged[col])), 3)
+                    abs_r   = abs(r)
+                    color   = "#16a34a" if abs_r >= 0.5 else ("#f97316" if abs_r >= 0.2 else "#64748b")
+                    width_b = int(abs_r * 100)
+                    signo   = "+" if r >= 0 else ""
+                    st.markdown(f"""
+                    <div style="background:#0d1220;border-radius:8px;padding:12px 14px;margin:6px 0;
+                         border:1px solid rgba(99,179,237,0.08)">
+                      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                        <span style="font-size:0.82rem;color:#e2e8f0">{nombre}</span>
+                        <span style="font-size:1rem;font-weight:700;color:{color}">r = {signo}{r}</span>
+                      </div>
+                      <div style="background:#1a2035;border-radius:4px;height:8px;margin-bottom:6px">
+                        <div style="width:{width_b}%;background:{color};height:100%;border-radius:4px"></div>
+                      </div>
+                      <div style="font-size:0.75rem;color:#64748b">{interpretacion}</div>
+                    </div>""", unsafe_allow_html=True)
+
+            # Insight clave
+            st.markdown("""
+            <div class="sigma-alert warn" style="margin-top:12px">
+            💡 <b>Implicancia para SIGMA:</b> Un alumno con muchos atrasos no necesariamente va a tener
+            baja asistencia. Son dos poblaciones de riesgo distintas que requieren intervenciones separadas.
+            El mejor predictor de asistencia baja es la propia tendencia reciente de asistencia.
+            </div>""", unsafe_allow_html=True)
+        else:
+            st.info("Se necesitan datos de asistencia y atrasos para calcular correlaciones.")
+
+    # ── TAB OUTLIERS ──────────────────────────────────────────────────
+    with tab_outliers:
+        st.markdown('<div class="section-title">Detección de outliers — método IQR y Z-score</div>',
+                    unsafe_allow_html=True)
+        st.markdown(
+            '<div class="sigma-alert info">Un outlier es un valor estadísticamente anómalo respecto al resto. '
+            'Se usan dos métodos: IQR (robusto, basado en cuartiles) y Z-score (basado en desviación estándar).</div>',
+            unsafe_allow_html=True)
+
+        col_o1, col_o2 = st.columns(2)
+
+        # Outliers asistencia — Z-score (IQR no sirve cuando Q1=Q3=100)
+        with col_o1:
+            st.markdown("**🔵 Outliers asistencia (Z-score)**")
+            if df_asist_alumnos is not None and not df_asist_alumnos.empty and "pct_asistencia" in df_asist_alumnos.columns:
+                pct = df_asist_alumnos["pct_asistencia"].dropna()
+                media_z = pct.mean()
+                std_z   = pct.std()
+                if std_z > 0:
+                    df_asist_alumnos["z_score"] = ((df_asist_alumnos["pct_asistencia"] - media_z) / std_z).round(2)
+                    outliers_z = df_asist_alumnos[df_asist_alumnos["z_score"] < -2].copy()
+                    outliers_z = outliers_z.sort_values("pct_asistencia")
+
+                    st.markdown(f"*Z-score < -2 | {len(outliers_z)} alumnos detectados*")
+                    st.markdown(
+                        f'<div class="sigma-alert warn">⚠️ Nota: IQR no aplica aquí porque Q1=Q3=100% '
+                        f'(el 76% tiene asistencia perfecta). Se usa Z-score en su lugar.</div>',
+                        unsafe_allow_html=True)
+
+                    if not outliers_z.empty:
+                        cols_show = [c for c in ["nombre","curso","pct_asistencia","z_score"] if c in outliers_z.columns]
+                        df_out_show = outliers_z[cols_show].rename(columns={
+                            "nombre":"Nombre","curso":"Curso",
+                            "pct_asistencia":"% Asist.","z_score":"Z-score"
+                        })
+                        show_pretty_table(df_out_show, max_rows=20, height=350)
+
+        # Outliers atrasos — IQR
+        with col_o2:
+            st.markdown("**🔴 Outliers atrasos (IQR)**")
+            if df_atr_alumnos is not None and not df_atr_alumnos.empty and "n_atrasos" in df_atr_alumnos.columns:
+                atr = df_atr_alumnos["n_atrasos"]
+                Q1  = atr.quantile(0.25)
+                Q3  = atr.quantile(0.75)
+                IQR = Q3 - Q1
+                lim = Q3 + 1.5 * IQR
+
+                outliers_atr = df_atr_alumnos[atr > lim].copy()
+                outliers_atr = outliers_atr.sort_values("n_atrasos", ascending=False)
+
+                st.markdown(f"*Límite: {lim:.0f} atrasos (Q3 + 1.5×IQR) | {len(outliers_atr)} detectados*")
+
+                pct_asi_col = None
+                if df_asist_alumnos is not None and "rut_norm" in df_asist_alumnos.columns:
+                    outliers_atr = outliers_atr.merge(
+                        df_asist_alumnos[["rut_norm","pct_asistencia"]],
+                        on="rut_norm", how="left"
+                    )
+                    pct_asi_col = "pct_asistencia"
+
+                if not outliers_atr.empty:
+                    cols_atr = [c for c in ["nombre","curso","n_atrasos","pct_asistencia","alerta"]
+                                if c in outliers_atr.columns]
+                    df_atr_show = outliers_atr[cols_atr].rename(columns={
+                        "nombre":"Nombre","curso":"Curso","n_atrasos":"Atrasos",
+                        "pct_asistencia":"% Asist.","alerta":"Nivel"
+                    })
+                    show_pretty_table(df_atr_show, max_rows=20, height=350)
+
+                    # Insight: ¿los outliers de atrasos tienen baja asistencia?
+                    if pct_asi_col and pct_asi_col in outliers_atr.columns:
+                        pct_100 = (outliers_atr[pct_asi_col] == 100).mean() * 100
+                        st.markdown(
+                            f'<div class="sigma-alert info">💡 {pct_100:.0f}% de los outliers de atrasos '
+                            f'tiene 100% de asistencia — llegan todos los días pero siempre tarde.</div>',
+                            unsafe_allow_html=True)
 
 
 def _load_csv(path: Path) -> pd.DataFrame | None:

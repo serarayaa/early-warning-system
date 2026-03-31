@@ -33,6 +33,22 @@ def _pick_periodo(df: pd.DataFrame) -> pd.Series:
     return p0.mask(p0 == "", p1)
 
 
+# Norma MINEDUC: atraso antes de las 9:30 → alumno queda PRESENTE
+# Atraso después de las 9:30 → alumno queda AUSENTE el resto del día
+CORTE_HORA_MINUTOS = 9 * 60 + 30  # 9:30 = 570 minutos
+
+def _clasificar_atraso(hora_str: str) -> str:
+    """Clasifica atraso como LEVE (queda presente) o GRAVE (queda ausente)."""
+    try:
+        h, m = str(hora_str).strip()[:5].split(":")
+        minutos = int(h) * 60 + int(m)
+        if minutos <= 0:
+            return "LEVE"  # Sin hora válida → conservador
+        return "LEVE" if minutos <= CORTE_HORA_MINUTOS else "GRAVE"
+    except Exception:
+        return "LEVE"
+
+
 def _alerta_por_atrasos(n: int) -> str:
     if n >= 8:
         return "CRITICO"
@@ -94,6 +110,13 @@ def run(
 
     eventos = eventos[eventos["rut_norm"] != ""].copy()
 
+    # ── Clasificar atraso según norma MINEDUC (9:30) ──────────────────
+    eventos["clasificacion"] = eventos["hora"].apply(_clasificar_atraso)
+    # Contar atrasos graves (generan ausencia) por separado
+    n_graves_nuevos = int((eventos["clasificacion"] == "GRAVE").sum())
+    if n_graves_nuevos > 0:
+        log.info(f"  Atrasos GRAVES (>9:30, generan ausencia): {n_graves_nuevos}")
+
     # ── Acumular con gold existente + deduplicar por id_atraso ───────
     gold_eventos = gold_dir / "atrasos_eventos.csv"
     if gold_eventos.exists():
@@ -117,17 +140,26 @@ def run(
     alumnos = (
         eventos.groupby(["rut_norm", "nombre", "curso"], as_index=False)
         .agg(
-            n_atrasos=("id_atraso", "count"),
-            n_justificados=("justificado", "sum"),
-            dias_con_atraso=("fecha", "nunique"),
-            primer_atraso=("fecha_hora", "min"),
-            ultimo_atraso=("fecha_hora", "max"),
+            n_atrasos       = ("id_atraso",       "count"),
+            n_justificados  = ("justificado",      "sum"),
+            n_graves        = ("clasificacion",    lambda x: (x == "GRAVE").sum()),
+            n_leves         = ("clasificacion",    lambda x: (x == "LEVE").sum()),
+            dias_con_atraso = ("fecha",            "nunique"),
+            primer_atraso   = ("fecha_hora",       "min"),
+            ultimo_atraso   = ("fecha_hora",       "max"),
         )
     )
     alumnos["pct_justificados"] = (
         (alumnos["n_justificados"] / alumnos["n_atrasos"]).fillna(0) * 100
     ).round(1)
-    alumnos["alerta"] = alumnos["n_atrasos"].apply(_alerta_por_atrasos)
+    # Alerta considera especialmente los atrasos GRAVES (generan ausencia)
+    alumnos["alerta"] = alumnos.apply(
+        lambda r: "CRITICO" if r["n_graves"] >= 3
+        else ("ALTO"   if r["n_graves"] >= 1 or r["n_atrasos"] >= 6
+        else ("MEDIO"  if r["n_atrasos"] >= 3
+        else  "BAJO")),
+        axis=1
+    )
 
     cursos = (
         eventos.groupby("curso", as_index=False)
@@ -162,6 +194,8 @@ def run(
     ev_hora["hora_min"] = ev_hora["hora_dt"].dt.hour * 60 + ev_hora["hora_dt"].dt.minute
     # Filtrar horas inválidas (00:00 o sin datos)
     ev_hora = ev_hora[(ev_hora["hora_min"] > 0) & ev_hora["hora_dt"].notna()]
+    # Marcar corte MINEDUC
+    ev_hora["es_grave"] = ev_hora["hora_min"] > CORTE_HORA_MINUTOS
 
     # Bloques de 10 minutos
     ev_hora["bloque"] = ev_hora["hora_min"].apply(
@@ -172,9 +206,10 @@ def run(
     by_bloque = (
         ev_hora.groupby("bloque", as_index=False)
         .agg(
-            atrasos     = ("id_atraso", "count"),
-            alumnos     = ("rut_norm",  "nunique"),
+            atrasos     = ("id_atraso",  "count"),
+            alumnos     = ("rut_norm",   "nunique"),
             justificados= ("justificado","sum"),
+            graves      = ("es_grave",   "sum"),
         )
         .sort_values("bloque")
     )
@@ -184,6 +219,10 @@ def run(
     by_bloque["pct_del_total"] = (
         by_bloque["atrasos"] / len(ev_hora) * 100
     ).round(1)
+    by_bloque["pct_graves"] = (
+        by_bloque["graves"] / by_bloque["atrasos"].replace(0,1) * 100
+    ).round(1)
+    by_bloque["es_post_corte"] = by_bloque["bloque"] > "09:30"
 
     # Tabla por día de la semana
     ev_hora["fecha_dt"] = pd.to_datetime(ev_hora["fecha"], errors="coerce")
@@ -266,14 +305,18 @@ def run(
     by_dia.to_csv(    gold_dir / "atrasos_by_dia.csv",      index=False)
     by_periodo.to_csv(gold_dir / "atrasos_by_periodo.csv",  index=False)
 
+    _n_graves = int((eventos["clasificacion"] == "GRAVE").sum()) if "clasificacion" in eventos.columns else 0
     meta = pd.DataFrame([
         {
-            "corte": str(corte),
-            "n_dias": int(serie["fecha"].nunique()) if not serie.empty else 0,
-            "eventos": int(len(eventos)),
-            "alumnos": int(eventos["rut_norm"].nunique()) if not eventos.empty else 0,
-            "generado": pd.Timestamp.now().isoformat(),
-            "csv_path": str(csv_path),
+            "corte":          str(corte),
+            "n_dias":         int(serie["fecha"].nunique()) if not serie.empty else 0,
+            "eventos":        int(len(eventos)),
+            "alumnos":        int(eventos["rut_norm"].nunique()) if not eventos.empty else 0,
+            "atrasos_graves": _n_graves,
+            "atrasos_leves":  int(len(eventos)) - _n_graves,
+            "corte_mineduc":  "09:30",
+            "generado":       pd.Timestamp.now().isoformat(),
+            "csv_path":       str(csv_path),
         }
     ])
     meta.to_csv(gold_dir / "atrasos_meta.csv", index=False)

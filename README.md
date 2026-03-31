@@ -1,453 +1,288 @@
-# SIGMA / EWS Escolar
+# SIGMA — Sistema Integrado de Gestión y Monitoreo Académico
 
-Sistema de procesamiento y monitoreo escolar con dos frentes integrados:
-
-1. Pipeline de datos (CLI) para matricula y desiste.
-2. Aplicacion Streamlit SIGMA para operacion diaria de matricula, asistencia y atrasos.
-
-El proyecto construye capas data/raw, data/staging, data/curated y data/gold para seguimiento operativo, auditoria de cambios por corte y consumo analitico.
+Sistema de alerta temprana (EWS) y monitoreo operativo para el **Liceo Politécnico Particular Andes** (RBD 24482, Renca). Construido en Python + Streamlit, procesa datos exportados desde Syscol y los convierte en indicadores accionables para dirección y equipos docentes.
 
 ---
 
-## Estado actual del proyecto (actualizado)
+## Estado actual (marzo 2026)
 
-Esta documentacion refleja el estado real del repositorio al 2026-03-16. Frente a versiones anteriores, hoy el proyecto incluye:
-
-- UI Streamlit productiva en app.py con modulo Matricula y modulo Asistencia.
-- Pipeline de Asistencia (procesamiento a data/gold/asistencia) con KPIs y visualizaciones.
-- Pipeline de Atrasos (procesamiento a data/gold/atrasos) con KPIs de recurrencia y riesgo.
-- Validacion de esquema y mapeo de columnas (matricula, desiste, asistencia) antes de procesar uploads en UI.
-- Comparacion automatica entre cortes de matricula (NEW, REMOVED, UPDATED, TRANSFER_INTERNAL).
-- Regla PRE_RETIRO / POST_RETIRO para desiste centralizada en configuracion.
-- Fingerprint de entrada en run-matricula para skip inteligente y recalculo selectivo de MASTER.
-- Dependencias de visualizacion y reporteria (streamlit, plotly, matplotlib, reportlab, etc.) activas en requirements.
-
----
-
-## 1) Objetivo funcional
-
-Resolver la operacion diaria de datos escolares con trazabilidad de snapshots y calculo consistente de indicadores.
-
-Flujo de Matricula (CLI):
-
-1. Ingesta de archivo fuente (csv/xlsx/xls) como snapshot inmutable.
-2. Estandarizacion en staging.
-3. Construccion de snapshot curado y diff entre cortes.
-4. Generacion de productos gold (current, demographics, history, status, master).
-
-Flujo de Asistencia (UI):
-
-1. Carga CSV desde Syscol.
-2. Validacion de estructura.
-3. Calculo de asistencia por alumno, curso y serie diaria hasta ultimo dia habil.
-4. Persistencia en data/gold/asistencia.
-
-Flujo de Atrasos (UI):
-
-1. Carga CSV de atrasos desde Syscol.
-2. Validacion de estructura y limpieza de columnas clave.
-3. Calculo de indicadores por evento, alumno, curso y serie diaria.
-4. Persistencia en data/gold/atrasos.
+| Módulo | Estado |
+|--------|--------|
+| 🏠 Dashboard ejecutivo | ✅ Operativo |
+| ⚡ Matrícula | ✅ Operativo |
+| 📅 Asistencia | ✅ Operativo |
+| ⏰ Atrasos | ✅ Operativo |
+| 📋 Observaciones | ✅ Operativo |
+| 📊 Histórico 2022-2026 | ✅ Operativo |
+| 🗺️ Geolocalización | ✅ Operativo (78% precisión) |
+| 📝 Notas | ✅ Operativo (esperando datos Syscol) |
+| 🧠 DIA / Socioemocional | 🔜 Pronto |
 
 ---
 
-## 2) Stack y requisitos
+## Stack
 
-- Python 3.10+ (recomendado 3.11).
-- Dependencias principales (requirements.txt):
-  - pandas, numpy, pyarrow, openpyxl, python-dateutil, pydantic, pyyaml, rich, pytest.
-  - streamlit, plotly.
-  - matplotlib, seaborn, scikit-learn.
-  - reportlab.
+- **Python** 3.10+ (recomendado 3.11)
+- **Streamlit** — UI principal
+- **Pandas / NumPy** — procesamiento de datos
+- **Plotly** — visualizaciones interactivas
+- **Matplotlib** — gráficos para PDF
+- **ReportLab** — generación de reportes PDF
+- **OpenPyXL** — lectura/escritura de Excel
+- **Nominatim (OpenStreetMap)** — geocodificación de direcciones
 
-Instalacion en Windows (PowerShell):
+---
+
+## Instalación
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+streamlit run app.py
 ```
 
 ---
 
-## 3) Estructura del proyecto
+## Estructura del proyecto
 
 ```text
-app.py                       # UI Streamlit principal (SIGMA)
-main.py                      # Entry point CLI
-requirements.txt
+app.py                          # UI Streamlit principal — sidebar y router de módulos
 
 src/
-  cli/
-    args.py                  # Definicion de comandos CLI
-    handlers.py              # Dispatcher de comandos
-    pipeline.py              # run-matricula (orquestador)
-  ingestion/
-    ingest_matricula.py
   staging/
-    build_stg_matricula.py
-    build_stg_desiste.py
-    build_stg_asistencia.py
-  curated/
-    build_curated_enrollment.py
+    build_stg_matricula.py      # Pipeline matrícula (CSV Syscol → staging parquet)
+    build_stg_asistencia.py     # Pipeline asistencia (CSV Syscol → gold)
+    build_stg_atrasos.py        # Pipeline atrasos (CSV Syscol → gold)
+    build_stg_observaciones.py  # Pipeline observaciones (CSV Syscol → gold)
+    build_stg_notas.py          # Pipeline notas (XLS Syscol + Excel ejes → gold)
+    build_historico.py          # Pipeline histórico 2022-2025 (ZIP Syscol → gold)
+    build_stg_desiste.py        # Pipeline desistimiento
+    geocode_matricula.py        # Geocodificación de direcciones con Nominatim
   gold/
-    enrollment_current.py
-    enrollment_status.py
-    enrollment_demographics.py
-    enrollment_history.py
-    enrollment_master.py
-  comparison/
-    compare_enrollment.py
-  validation/
-    schema_registry.py
-    schema_validator.py
-    column_mapper.py
-  config/
-    settings.py
-    logging.yaml
+    enrollment_current.py       # Gold matrícula corte actual
+    enrollment_demographics.py  # Gold demografía
+    enrollment_status.py        # Gold estado por alumno
   utils/
-    transforms.py
-    logging_utils.py
+    transforms.py               # Normalización RUT, fechas, textos
 
 ui/
-  matricula_page.py
-  asistencia_page.py
-  enrollment_data.py
-  enrollment_processing.py
-  schema_feedback.py
-  styles.py
+  matricula_page.py             # Módulo Matrícula (7 tabs)
+  asistencia_page.py            # Módulo Asistencia
+  atrasos_page.py               # Módulo Atrasos
+  observaciones_page.py         # Módulo Observaciones
+  historico_page.py             # Módulo Histórico 2022-2026 (6 tabs)
+  notas_page.py                 # Módulo Notas (5 tabs)
+  dashboard_page.py             # Dashboard ejecutivo
+  geo_page.py                   # Módulo Geolocalización
+  executive_pdf.py              # Generador de PDFs (matrícula, asistencia, atrasos, ejecutivo)
+  enrollment_data.py            # Carga y caché de datos de matrícula
+  enrollment_processing.py      # Procesamiento de uploads de matrícula
 
 data/
   raw/
+    matricula/                  # Snapshots CSV inmutables de Syscol
+    notas/                      # Excel de ejes de evaluación
   staging/
+    matricula/                  # Parquets de staging
   curated/
+    enrollment/                 # Snapshots curados + diffs entre cortes
   gold/
-
-tests/
-  test_transforms.py
+    enrollment/                 # Gold matrícula (parquets por corte)
+    asistencia/                 # Gold asistencia (CSVs)
+    atrasos/                    # Gold atrasos (CSVs)
+    observaciones/              # Gold observaciones (CSVs)
+    historico/                  # Gold histórico 2022-2026 (CSVs)
+    geocoding/                  # Cache geocodificación + parquet geocoded
+    notas/                      # Gold notas (CSVs + acumulado)
 ```
 
 ---
 
-## 4) Modos de ejecucion
+## Módulos operativos
 
-### 4.1 UI SIGMA (recomendado para operacion)
+### 🏠 Dashboard ejecutivo
+
+Vista consolidada del establecimiento con:
+- 6 KPIs con semáforo automático (matrícula, asistencia, alertas, atrasos, observaciones, riesgo total)
+- Serie temporal de asistencia y observaciones
+- Tabla de riesgo consolidado por alumno (descargable)
+- Resumen por especialidad
+- Botón **"Generar Reporte Ejecutivo PDF"** — 3 páginas con todos los módulos
+
+### ⚡ Matrícula
+
+- Carga CSV de matrícula desde Syscol (formato latin-1, separador `;`)
+- Detección automática de alumnos **retirados** por fecha de retiro o estado
+- Tabla de retirados en Dashboard y Nómina
+- 7 tabs: Dashboard · Nómina · Especialidades · Demografía · Anomalías · Calidad de datos · Reportes
+- Reportes PDF: Ejecutivo (indicadores + tablas) + Visual (gráficos)
+- Checkbox **"Forzar reproceso"** para regenerar cuando el archivo tiene el mismo nombre
+
+### 📅 Asistencia
+
+- Carga CSV de asistencia diaria de Syscol
+- **Acumulación automática** — deduplica por `fecha + rut_alumno`; puedes subir días sueltos o la semana completa sin duplicar
+- Umbrales operativos: Legal < 85%, Crítico < 75%
+- Tendencia de últimos 3 días por alumno
+- Serie diaria, semáforo por curso, alertas individuales
+- Reporte PDF descargable
+
+### ⏰ Atrasos
+
+- Carga CSV de atrasos de Syscol
+- **Acumulación automática** — deduplica por `id_atraso` (ID único de Syscol)
+- Análisis por alumno, curso, bloque horario y período del día
+- Pico horario consistente detectado: 08:10–08:20
+- Alertas por recurrencia: Bajo (1-2), Medio (3-5), Alto (6+)
+- Reporte PDF descargable
+
+### 📋 Observaciones
+
+- Carga CSV de observaciones de Syscol
+- **Acumulación automática** — deduplica por `id_obs`
+- Tipos: NEG (negativa), POS (positiva), OBS (neutra)
+- Análisis por alumno, curso, docente y serie diaria
+
+### 📊 Histórico 2022-2026
+
+- Carga ZIP con carpetas por año (formato Syscol `SYSCOL_años_anteriores.zip`)
+- 6 tabs: Matrícula · Atrasos · Asistencia · Observaciones · Desglose personalizado · Cargar datos
+- Tendencias detectadas:
+  - Matrícula: 1.427 (2022) → 1.353 (2025), caída -5.2%
+  - Atrasos: pico 2024 con +118% respecto a 2023
+  - Asistencia anual estable: 89-90%
+
+### 🗺️ Geolocalización
+
+- Geocodificación de direcciones con Nominatim (OpenStreetMap)
+- 1.017 exactas + 287 centroide (78% precisión en la última corrida)
+- Caché en `data/gold/geocoding/geocode_cache.json`
+- Visualización de distribución geográfica de alumnos
+
+### 📝 Notas
+
+- **Paso 1**: Carga Excel de ejes de evaluación (tabla maestra de ponderaciones)
+- **Paso 2**: Carga ZIP con archivos XLS de Syscol (un archivo por eje × curso)
+- Parseo automático del nombre de archivo: `{CURSO}-{COD_ASIG}-{N}per_{ID}.xls`
+- Cálculo de promedio ponderado por asignatura redistribuyendo entre ejes disponibles
+- **Acumulación automática** — deduplica por `nombre + curso + asignatura + semestre`
+- 5 tabs: Configuración · Notas por alumno · Por curso · Riesgo académico · Cargar datos
+
+---
+
+## Flujo operativo semanal recomendado
+
+```
+Cada viernes:
+  1. Bajar desde Syscol: asistencia semana + atrasos semana + observaciones semana
+  2. Subir cada CSV en su módulo correspondiente en SIGMA
+  3. Revisar Dashboard → tabla de riesgo consolidado
+  4. Generar Reporte Ejecutivo PDF para dirección
+
+Cada 2 semanas (cuando haya notas):
+  1. Bajar ZIP de notas de Syscol
+  2. Subir en módulo Notas → SIGMA calcula promedios ponderados
+  3. Revisar tab Riesgo Académico
+
+Cuando haya nueva matrícula:
+  1. Subir CSV de matrícula con "Forzar reproceso" marcado
+  2. Verificar alumnos retirados en Dashboard
+```
+
+---
+
+## Acumulación y deduplicación de datos
+
+Todos los pipelines de eventos acumulan datos entre cargas sucesivas y eliminan duplicados automáticamente:
+
+| Módulo | Clave de deduplicación |
+|--------|----------------------|
+| Asistencia | `fecha + rut_alumno` |
+| Atrasos | `id_atraso` (ID único Syscol) |
+| Observaciones | `id_obs` (ID único Syscol) |
+| Notas | `nombre + curso + cod_asig + term_id` |
+| Matrícula | Snapshot completo — usar "Forzar reproceso" para actualizar |
+
+Esto permite subir días sueltos durante la semana y la semana completa el viernes sin duplicar registros.
+
+---
+
+## Módulo de Notas — Estructura de ejes de evaluación
+
+El sistema usa una **tabla maestra de ejes** (Excel) que define:
+
+```
+academic_year | level | specialty | term_id | cod_asignatura | asignatura | cod_eje | eje_evaluacion | ponderacion_eje
+```
+
+- `term_id`: S1 (1° semestre), S2 (2° semestre), EXT (4° medio — semestre extendido)
+- `ponderacion_eje`: peso % del eje en la nota final de la asignatura (deben sumar 100%)
+- Los archivos XLS de Syscol deben nombrarse: `{CURSO}-{COD_ASIG}-{N}per_{ID}.xls`
+  - Ejemplo: `1EMA-LENG-1per_234122.xls`, `3EMB-MAT-2per_99999.xls`
+  - 4° medio siempre usa `1per` (el sistema lo mapea a `EXT` internamente)
+
+---
+
+## Reportes PDF disponibles
+
+| Reporte | Módulo | Páginas | Contenido |
+|---------|--------|---------|-----------|
+| Ejecutivo Matrícula | ⚡ Matrícula | 1 | KPIs + tablas de distribución |
+| Visual Matrícula | ⚡ Matrícula | 2-3 | Gráficos de género, especialidad, cursos |
+| Asistencia | 📅 Asistencia | 2-3 | KPIs + cursos críticos + alumnos bajo 75% |
+| Atrasos | ⏰ Atrasos | 2-3 | KPIs + top alumnos + distribución horaria |
+| Ejecutivo Consolidado | 🏠 Dashboard | 3 | Todos los módulos + semáforo general |
+
+---
+
+## Umbrales operativos
+
+```python
+# Asistencia
+UMBRAL_LEGAL   = 85.0  # < 85% → alerta legal
+UMBRAL_CRITICO = 75.0  # < 75% → crítico
+
+# Atrasos
+UMBRAL_MEDIO = 3   # >= 3 atrasos → alerta media
+UMBRAL_ALTO  = 6   # >= 6 atrasos → alerta alta
+
+# Observaciones negativas
+UMBRAL_ALTO    = 3   # >= 3 obs. negativas → alto
+UMBRAL_CRITICO = 5   # >= 5 obs. negativas → crítico
+
+# Notas
+NOTA_APRUEBA = 4.0
+NOTA_EN_RIESGO = 4.5  # aprobado pero cerca del límite
+```
+
+---
+
+## Troubleshooting
+
+| Error | Causa | Solución |
+|-------|-------|----------|
+| `WindowsPath + str` | Concatenación de Path con string | Usar `Path / (str + str)` |
+| `[WinError 32]` archivo en uso | openpyxl no cierra el workbook | `wb.close()` explícito, el temp se limpia al reiniciar |
+| Datos no se actualizan | `__pycache__` con versión vieja | Eliminar `src/staging/__pycache__/` y reiniciar |
+| Parquet basura `20261231` | Fecha por defecto en pipeline | Filtrado automático en `list_enrollment_dates()` |
+| Asistencia/Atrasos vacíos tras subir ZIP histórico | Pipeline viejo en caché | Eliminar `__pycache__` y volver a subir ZIP |
+| `UnboundLocalError: _load_csv` | Nombre de función local colisiona con módulo | Renombrar la función interna |
+
+---
+
+## Variables de entorno (opcionales)
 
 ```powershell
-streamlit run app.py
-```
-
-Incluye:
-
-- Modulo Matricula.
-- Modulo Asistencia.
-- Modulo Atrasos.
-- Modulos futuros marcados como Pronto.
-
-### 4.2 CLI del pipeline
-
-```powershell
-python main.py <comando> [opciones]
-```
-
-CLI orientado a automatizacion y ejecucion batch.
-
----
-
-## 5) Comandos CLI disponibles
-
-### 5.1 Utilidades
-
-- ping
-  - Verifica entorno y muestra rutas efectivas.
-
-### 5.2 Ingesta / Staging / Curated
-
-- ingest-matricula <file>
-  - Guarda snapshot en data/raw/matricula y actualiza manifest.json.
-- build-stg-matricula <snapshot>
-  - Genera parquet de staging desde snapshot raw.
-- build-stg-desiste <file>
-  - Genera parquet de staging para desiste.
-- build-curated-enrollment
-  - Requiere al menos 2 parquets en staging/matricula.
-  - Genera snapshot curado + diff.
-
-### 5.3 Gold de matricula
-
-- gold-enrollment-status [--no-excel]
-- gold-enrollment-current --snapshot-date YYYY-MM-DD [--excel]
-- gold-enrollment-demographics --snapshot-date YYYY-MM-DD [--excel] [--top-n 10]
-- gold-enrollment-history --snapshot-date YYYY-MM-DD [--excel]
-- gold-enrollment-master [--snapshot-date YYYY-MM-DD] [--excel]
-
-### 5.4 Pipeline end-to-end
-
-- run-matricula <file> [--snapshot-date YYYY-MM-DD] [--excel] [--top-n N] [--force]
-  [--desiste-file ... | --desiste-folder ... | --desiste-auto]
-
-Ejemplo:
-
-```powershell
-python main.py run-matricula "C:\ruta\matricula-2026-03-16.csv" --snapshot-date 2026-03-16 --excel --desiste-auto
-```
-
-Comportamiento clave de run-matricula:
-
-- Calcula fingerprint SHA256 + size del archivo fuente.
-- Si no hay cambios y no se usa --force, omite pasos pesados.
-- Si se solicita desiste, puede recalcular MASTER incluso cuando matricula no cambio.
-- Guarda estado en data/.state/run_matricula_last_snapshot.txt.
-
----
-
-## 6) Flujo de datos por capas
-
-```text
-Fuente Matricula (csv/xlsx/xls)
-  -> data/raw/matricula (snapshot + manifest)
-  -> data/staging/matricula/*.parquet
-  -> data/curated/enrollment/snapshot + diff
-  -> data/gold/enrollment/*
-
-Fuente Desiste (csv/xlsx/xls)
-  -> data/staging/desiste/*.parquet
-  -> data/gold/enrollment/enrollment_master*
-
-Fuente Asistencia (csv Syscol)
-  -> procesamiento en UI (build_stg_asistencia.run)
-  -> data/gold/asistencia/*.csv
-
-Fuente Atrasos (csv Syscol)
-  -> procesamiento en UI (build_stg_atrasos.run)
-  -> data/gold/atrasos/*.csv
-```
-
----
-
-## 7) Artefactos generados
-
-### 7.1 Raw
-
-- data/raw/matricula/matricula_snapshot_YYYYMMDD_HHMMSS.ext
-- data/raw/matricula/manifest.json
-
-### 7.2 Staging
-
-- data/staging/matricula/matricula_snapshot_YYYYMMDD_HHMMSS.parquet
-- data/staging/desiste/desiste_snapshot__<archivo>.parquet
-
-### 7.3 Curated
-
-- data/curated/enrollment/enrollment_snapshot__matricula_snapshot_*.parquet
-- data/curated/enrollment/enrollment_diff__<prev>__to__<curr>.parquet
-
-### 7.4 Gold Matricula
-
-- enrollment_current__YYYYMMDD.parquet
-- enrollment_metrics__YYYYMMDD.parquet
-- enrollment_demographics__YYYYMMDD.parquet
-- enrollment_by_comuna__YYYYMMDD.parquet
-- enrollment_by_nacionalidad__YYYYMMDD.parquet
-- enrollment_by_course__YYYYMMDD.parquet
-- enrollment_by_specialty__YYYYMMDD.parquet
-- enrollment_demographics_history.parquet
-- enrollment_age_anomalies__YYYYMMDD.parquet
-- enrollment_age_anomalies__YYYYMMDD.txt
-- enrollment_transfers_pre__<stamp>.parquet
-- enrollment_transfers_post__<stamp>.parquet
-- enrollment_transfers_all__<stamp>.parquet
-- enrollment_master__YYYYMMDD.parquet
-- enrollment_master_metrics__YYYYMMDD.parquet
-
-Si se habilita export Excel en comandos gold, se generan equivalentes xlsx.
-
-### 7.5 Gold Asistencia
-
-- data/gold/asistencia/asistencia_alumnos.csv
-- data/gold/asistencia/asistencia_cursos.csv
-- data/gold/asistencia/asistencia_serie.csv
-- data/gold/asistencia/asistencia_meta.csv
-
-### 7.6 Gold Atrasos
-
-- data/gold/atrasos/atrasos_eventos.csv
-- data/gold/atrasos/atrasos_alumnos.csv
-- data/gold/atrasos/atrasos_cursos.csv
-- data/gold/atrasos/atrasos_serie.csv
-- data/gold/atrasos/atrasos_meta.csv
-
----
-
-## 8) Reglas de negocio relevantes
-
-### 8.1 Dedupe por RUT
-
-Se selecciona un registro representativo por rut_norm en etapas clave para evitar inflar indicadores.
-
-### 8.2 Estado al corte
-
-La clasificacion de estado usa fecha_retiro vs snapshot_date para determinar:
-
-- MATRICULADO
-- RETIRADO
-- transferencias internas (cuando coexisten condiciones activo/retiro en un mismo RUT)
-
-### 8.3 Regla PRE_RETIRO / POST_RETIRO para DESISTE
-
-Configurada por EWS_CUTOFF_DESISTE (default 2026-03-16):
-
-- PRE_RETIRO: snapshot_date <= cutoff, desiste se reporta como universo aparte.
-- POST_RETIRO: snapshot_date > cutoff, desiste se ignora en MASTER.
-
-### 8.4 Asistencia y umbrales
-
-En asistencia se usan umbrales operativos:
-
-- Alerta legal: < 85%
-- Critico: < 75%
-- Tendencia de baja segun comportamiento de ultimos 3 dias
-
----
-
-## 9) Validacion de esquema (UI)
-
-Antes de procesar archivos en la UI:
-
-- Se valida estructura minima requerida.
-- Se mapean aliases de columnas a nombres canonicos.
-- Se muestra feedback visual de columnas detectadas/faltantes.
-
-Esquemas definidos:
-
-- Matricula
-- Desiste
-- Asistencia
-
-Ubicacion: src/validation/schema_registry.py.
-
----
-
-## 10) Configuracion por variables de entorno
-
-### 10.1 Rutas
-
-- EWS_DATA_DIR
-- EWS_LOG_DIR
-
-### 10.2 Reglas de negocio (opcionales)
-
-- EWS_ATTENDANCE_RISK_PCT
-- EWS_FAIL_GRADE_THRESHOLD
-- EWS_MAX_FAILED_SUBJECTS
-- EWS_CUTOFF_DESISTE
-- EWS_AGE_MIN
-- EWS_AGE_MAX
-- EWS_AGE_DIFF_THRESHOLD
-
-Ejemplo (PowerShell):
-
-```powershell
-$env:EWS_DATA_DIR = "D:\ews_data"
-$env:EWS_LOG_DIR = "D:\ews_logs"
-$env:EWS_CUTOFF_DESISTE = "2026-03-16"
-python main.py ping
-```
-
----
-
-## 11) Ejecucion operativa recomendada
-
-### 11.1 Matricula diaria (CLI)
-
-```powershell
-python main.py run-matricula "C:\ruta\matricula.csv" --snapshot-date YYYY-MM-DD --excel --desiste-auto
-```
-
-### 11.2 Operacion interactiva (UI)
-
-```powershell
-streamlit run app.py
-```
-
-En UI:
-
-1. Seleccionar corte disponible.
-2. Subir matricula (y desiste si corresponde por calendario).
-3. Revisar tabs de dashboard, especialidades, desistimientos, demografia.
-4. Cambiar a modulo Asistencia para carga y monitoreo diario.
-
----
-
-## 12) Testing
-
-Pruebas disponibles actualmente:
-
-- tests/test_transforms.py
-
-Ejecucion:
-
-```powershell
-pytest -q
-```
-
-Cobertura actual enfocada en utilidades de transformacion (normalizacion RUT, parseo de fechas, seleccion por RUT).
-
----
-
-## 13) Scripts auxiliares incluidos
-
-- sigma_charts.py
-  - Graficos interactivos (plotly).
-- sigma_pdf_charts.py
-  - Graficos para export PDF (matplotlib).
-- sigma_reports.py
-  - Generacion de reportes PDF/Excel ejecutivos.
-- parche_metrics_app.py
-  - Script de parche puntual historico sobre app.py.
-
-Estos scripts estan en el repo como soporte de reporteria/evolucion y pueden no estar acoplados al flujo principal actual de app.py.
-
----
-
-## 14) Troubleshooting rapido
-
-- Extension no soportada
-  - Usar csv/xlsx/xls en matricula/desiste, csv en asistencia UI.
-
-- Se requieren al menos 2 parquet en staging para curated
-  - Cargar al menos dos snapshots de matricula antes de build-curated-enrollment.
-
-- No aparece informacion en UI
-  - Verificar existencia de archivos en data/gold/enrollment, data/gold/asistencia o data/gold/atrasos.
-
-- Error de lectura CSV
-  - El pipeline intenta multiples encodings (utf-8, latin1, cp1252), revisar export origen si persiste.
-
-- MASTER no se recalcula con desiste
-  - Confirmar uso de --desiste-file o --desiste-auto con staging/folder disponible.
-
----
-
-## 15) Comandos de referencia
-
-```powershell
-python main.py ping
-python main.py ingest-matricula "C:\ruta\matricula.csv"
-python main.py build-stg-matricula "matricula_snapshot_20260316_123134.csv"
-python main.py build-curated-enrollment
-python main.py gold-enrollment-current --snapshot-date 2026-03-16 --excel
-python main.py gold-enrollment-demographics --snapshot-date 2026-03-16 --excel --top-n 10
-python main.py gold-enrollment-history --snapshot-date 2026-03-16 --excel
-python main.py gold-enrollment-status
-python main.py build-stg-desiste "C:\ruta\desiste_2026-03-16.csv"
-python main.py gold-enrollment-master --snapshot-date 2026-03-16 --excel
-python main.py run-matricula "C:\ruta\matricula-2026-03-16.csv" --snapshot-date 2026-03-16 --excel --desiste-auto
-streamlit run app.py
+$env:EWS_DATA_DIR            = "D:\ews_data"
+$env:EWS_LOG_DIR             = "D:\ews_logs"
+$env:EWS_CUTOFF_DESISTE      = "2026-03-16"
+$env:EWS_ATTENDANCE_RISK_PCT = "85"
+$env:EWS_FAIL_GRADE_THRESHOLD = "4.0"
 ```
 
 ---
 
 ## Licencia
 
-MIT License
+MIT License — Liceo Politécnico Particular Andes, Renca, 2026

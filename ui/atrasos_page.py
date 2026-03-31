@@ -17,13 +17,15 @@ from ui.schema_feedback import mostrar_validacion_esquema
 MIME_CSV = "text/csv"
 
 
-def _kpi(col, val, label, color="#2563eb"):
+def _kpi(col, val, label, color="#2563eb", sub=None):
+    _sub = f'<div style="font-size:0.62rem;color:#64748b;margin-top:2px">{sub}</div>' if sub else ""
     col.markdown(
         f"""
         <div style="background:#0d1220;border-radius:8px;padding:14px 8px;text-align:center;
                     border:1px solid rgba(99,179,237,0.10); border-bottom:3px solid {color}">
             <div style="font-size:1.7rem;font-weight:700;color:{color}">{val}</div>
             <div style="font-size:0.68rem;color:#94a3b8;margin-top:2px;text-transform:uppercase">{label}</div>
+            {_sub}
         </div>
         """,
         unsafe_allow_html=True,
@@ -196,16 +198,48 @@ def render_atrasos_page():
     pct_just       = round(justificados / total_atrasos * 100, 1) if total_atrasos else 0.0
     reincidentes   = int((df_alumnos["n_atrasos"] >= 3).sum()) if "n_atrasos" in df_alumnos.columns else 0
     criticos       = int((df_alumnos["alerta"] == "CRITICO").sum()) if "alerta" in df_alumnos.columns else 0
-    altos          = int((df_alumnos["alerta"] == "ALTO").sum()) if "alerta" in df_alumnos.columns else 0
     prom_por_alumno = round(total_atrasos / alumnos_unicos, 1) if alumnos_unicos else 0
 
+    # Clasificación MINEDUC: LEVE (≤9:30 → presente) vs GRAVE (>9:30 → ausente)
+    n_graves = int((df_eventos["clasificacion"] == "GRAVE").sum()) if "clasificacion" in df_eventos.columns else 0
+    n_leves  = total_atrasos - n_graves
+    pct_graves = round(n_graves / total_atrasos * 100, 1) if total_atrasos else 0.0
+
+    # Fila 1: KPIs generales
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     _kpi(c1, f"{total_atrasos:,}",     "Atrasos totales",       "#2563eb")
     _kpi(c2, f"{alumnos_unicos:,}",    "Alumnos involucrados",  "#16a34a")
     _kpi(c3, f"{pct_just}%",           "Justificados",          "#d97706")
     _kpi(c4, f"{reincidentes:,}",      "Reincidentes (≥3)",     "#7c3aed")
-    _kpi(c5, f"{criticos:,}",          "Críticos (≥8)",         "#dc2626")
+    _kpi(c5, f"{criticos:,}",          "Críticos (≥3 graves)",  "#dc2626")
     _kpi(c6, f"{prom_por_alumno}",     "Prom. atrasos/alumno",  "#6b7280")
+
+    # Fila 2: KPIs norma MINEDUC
+    st.markdown(
+        '<div class="section-title" style="margin-top:8px">'
+        'Clasificación norma MINEDUC — corte 9:30</div>',
+        unsafe_allow_html=True)
+    cm1, cm2, cm3, cm4 = st.columns(4)
+    _kpi(cm1, f"{n_leves:,}",      "Leves (≤9:30, presente)", "#16a34a",
+         sub=f"{100-pct_graves:.1f}% del total")
+    _kpi(cm2, f"{n_graves:,}",     "Graves (>9:30, ausente)",  "#dc2626",
+         sub=f"{pct_graves:.1f}% del total")
+    # Alumnos con al menos 1 atraso grave
+    alumnos_con_grave = int((df_alumnos["n_graves"] > 0).sum()) if "n_graves" in df_alumnos.columns else 0
+    _kpi(cm3, f"{alumnos_con_grave:,}", "Alumnos con atraso grave", "#dc2626",
+         sub="genera ausencia MINEDUC")
+    # Alumnos con ≥3 atrasos graves (crítico real)
+    alumnos_critico_grave = int((df_alumnos["n_graves"] >= 3).sum()) if "n_graves" in df_alumnos.columns else 0
+    _kpi(cm4, f"{alumnos_critico_grave:,}", "Críticos graves (≥3)", "#991b1b",
+         sub="impacto directo en asistencia")
+
+    if n_graves > 0:
+        st.markdown(
+            f'<div class="sigma-alert warn">⚠️ <b>Norma MINEDUC:</b> Los {n_graves} atrasos graves '
+            f'(después de las 9:30) generan ausencia automática ese día. '
+            f'Los {alumnos_con_grave} alumnos afectados pueden tener su % de asistencia '
+            f'reducido sin que aparezca explícitamente en el módulo de asistencia.</div>',
+            unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Sub-tabs ──────────────────────────────────────────────────────
